@@ -1,0 +1,74 @@
+Лабораторная работа №3: Геометрические преобразования и интерполяция
+Дата: Sat Apr 04 20:26:05 MSK 2026
+
+=== baboon (200×200) ===
+  Поворот:
+       30°  NN:    4ms  Bilinear:    3ms  Bicubic:   12ms  PSNR(BL/NN)= 31,5dB  PSNR(BL/BC)= 41,8dB
+       45°  NN:    0ms  Bilinear:    0ms  Bicubic:    2ms  PSNR(BL/NN)= 32,4dB  PSNR(BL/BC)= 42,0dB
+       90°  NN:    0ms  Bilinear:    0ms  Bicubic:    1ms  PSNR(BL/NN)=100,0dB  PSNR(BL/BC)=100,0dB
+      135°  NN:    0ms  Bilinear:    0ms  Bicubic:    2ms  PSNR(BL/NN)= 32,4dB  PSNR(BL/BC)= 42,0dB
+  Скос (shear X = 0.5):
+    Сохранено.
+  Поворот 45° + масштаб ×1.5:
+    Сохранено.
+  Поворот in-situ (3 скоса, 45°):
+    PSNR(in-situ vs bilinear): 19,25 dB
+    Сохранено.
+
+=== checker (256×256) ===
+  Поворот:
+       30°  NN:    0ms  Bilinear:    0ms  Bicubic:    3ms  PSNR(BL/NN)= 25,5dB  PSNR(BL/BC)= 36,8dB
+       45°  NN:    0ms  Bilinear:    1ms  Bicubic:    3ms  PSNR(BL/NN)= 25,6dB  PSNR(BL/BC)= 37,2dB
+       90°  NN:    0ms  Bilinear:    0ms  Bicubic:    1ms  PSNR(BL/NN)= 18,2dB  PSNR(BL/BC)= 33,2dB
+      135°  NN:    0ms  Bilinear:    1ms  Bicubic:    3ms  PSNR(BL/NN)= 25,6dB  PSNR(BL/BC)= 37,2dB
+  Скос (shear X = 0.5):
+    Сохранено.
+  Поворот 45° + масштаб ×1.5:
+    Сохранено.
+  Поворот in-situ (3 скоса, 45°):
+    PSNR(in-situ vs bilinear): 17,36 dB
+    Сохранено.
+
+=== circles (256×256) ===
+  Поворот:
+       30°  NN:    0ms  Bilinear:    1ms  Bicubic:    3ms  PSNR(BL/NN)= 40,9dB  PSNR(BL/BC)= 52,1dB
+       45°  NN:    0ms  Bilinear:    1ms  Bicubic:    3ms  PSNR(BL/NN)= 40,6dB  PSNR(BL/BC)= 52,3dB
+       90°  NN:    0ms  Bilinear:    0ms  Bicubic:    1ms  PSNR(BL/NN)= 34,0dB  PSNR(BL/BC)= 48,1dB
+      135°  NN:    0ms  Bilinear:    1ms  Bicubic:    3ms  PSNR(BL/NN)= 40,6dB  PSNR(BL/BC)= 52,3dB
+  Скос (shear X = 0.5):
+    Сохранено.
+  Поворот 45° + масштаб ×1.5:
+    Сохранено.
+  Поворот in-situ (3 скоса, 45°):
+    PSNR(in-situ vs bilinear): 31,22 dB
+    Сохранено.
+
+=== gradient (256×256) ===
+  Поворот:
+       30°  NN:    0ms  Bilinear:    0ms  Bicubic:    3ms  PSNR(BL/NN)= 35,4dB  PSNR(BL/BC)= 46,8dB
+       45°  NN:    0ms  Bilinear:    1ms  Bicubic:    3ms  PSNR(BL/NN)= 32,6dB  PSNR(BL/BC)= 47,1dB
+       90°  NN:    0ms  Bilinear:    0ms  Bicubic:    1ms  PSNR(BL/NN)= 27,9dB  PSNR(BL/BC)= 45,9dB
+      135°  NN:    0ms  Bilinear:    0ms  Bicubic:    3ms  PSNR(BL/NN)= 32,6dB  PSNR(BL/BC)= 47,1dB
+  Скос (shear X = 0.5):
+    Сохранено.
+  Поворот 45° + масштаб ×1.5:
+    Сохранено.
+  Поворот in-situ (3 скоса, 45°):
+    PSNR(in-situ vs bilinear): 18,55 dB
+    Сохранено.
+
+=== sonoma_photo (256×256) ===
+  Поворот:
+       30°  NN:    0ms  Bilinear:    0ms  Bicubic:    3ms  PSNR(BL/NN)= 36,6dB  PSNR(BL/BC)= 48,1dB
+       45°  NN:    0ms  Bilinear:    1ms  Bicubic:    3ms  PSNR(BL/NN)= 34,1dB  PSNR(BL/BC)= 48,4dB
+       90°  NN:    0ms  Bilinear:    0ms  Bicubic:    1ms  PSNR(BL/NN)= 29,3dB  PSNR(BL/BC)= 46,8dB
+      135°  NN:    0ms  Bilinear:    0ms  Bicubic:    3ms  PSNR(BL/NN)= 34,1dB  PSNR(BL/BC)= 48,4dB
+  Скос (shear X = 0.5):
+    Сохранено.
+  Поворот 45° + масштаб ×1.5:
+    Сохранено.
+  Поворот in-situ (3 скоса, 45°):
+    PSNR(in-situ vs bilinear): 19,27 dB
+    Сохранено.
+
+Все результаты сохранены в results3/

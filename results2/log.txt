@@ -1,29 +1,17 @@
 Лабораторная работа №2: Преобразование Фурье
-Дата: Sun Mar 29 14:18:37 MSK 2026
+Дата: Sat Apr 04 19:17:57 MSK 2026
 
-=== 1D FFT: смесь синусоид ===
-  Сигнал 1: RMSE после IFFT = 4,14e-15 (должно быть ≈ 0)
-  Сигнал 2: RMSE после IFFT = 1,17e-14
-
-=== 2D FFT: синтетические изображения из синусоид ===
+  Сигнал 1: RMSE(IFFT) = 4,14e-15
+  Сигнал 2: RMSE(IFFT) = 1,17e-14
   sin_horizontal: RMSE(IFFT) = 1,38e-13
   sin_vertical: RMSE(IFFT) = 1,38e-13
   sin_diagonal: RMSE(IFFT) = 3,61e-13
   sin_mix: RMSE(IFFT) = 1,34e-13
-
-=== 2D FFT: реальные изображения ===
-  checker: размер=256x256, RMSE(IFFT)=4,88e-13
-    Спектр Хаара сохранён: results2/checker_haar.png
-  gradient: размер=256x256, RMSE(IFFT)=2,31e-13
-    Спектр Хаара сохранён: results2/gradient_haar.png
-  circles: размер=256x256, RMSE(IFFT)=2,53e-13
-    Спектр Хаара сохранён: results2/circles_haar.png
-  baboon: размер=200x200, RMSE(IFFT)=2,88e-13
-    Спектр Хаара сохранён: results2/baboon_haar.png
-  sonoma_photo: размер=256x256, RMSE(IFFT)=1,82e-13
-    Спектр Хаара сохранён: results2/sonoma_photo_haar.png
-
-=== Спектр Хаара (1D) ===
-  Сигнал 1: RMSE после обратного Хаара = 4,12e-16
+  checker: 256x256, RMSE(IFFT)=4,88e-13
+  gradient: 256x256, RMSE(IFFT)=2,31e-13
+  circles: 256x256, RMSE(IFFT)=2,53e-13
+  baboon: 200x200, RMSE(IFFT)=2,88e-13
+  sonoma_photo: 256x256, RMSE(IFFT)=1,82e-13
+  Сигнал 1: RMSE(обратный Хаар) = 4,12e-16
 
 Всё сохранено в results2/
