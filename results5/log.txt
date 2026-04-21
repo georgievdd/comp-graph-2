@@ -1,0 +1,46 @@
+=== Lab5: Цветовые пространства и обработка цветных изображений ===
+
+--- baboon (200x200) ---
+  RMSE RGB->HSV->RGB:    0,0000
+  RMSE RGB->YCbCr->RGB:  0,0000
+  RMSE RGB->CIELab->RGB: 0,0000
+  Saved histogram equalization: baboon_histeq.png
+  Saved white balance: baboon_whitebalance.png
+  Saved quantization: baboon_quantize.png
+  Saved hue shift: baboon_hueshift.png
+  Saved chroma key: baboon_chromakey.png
+
+--- sonoma_photo (256x256) ---
+  RMSE RGB->HSV->RGB:    0,0000
+  RMSE RGB->YCbCr->RGB:  0,0000
+  RMSE RGB->CIELab->RGB: 0,0000
+  Saved histogram equalization: sonoma_photo_histeq.png
+  Saved white balance: sonoma_photo_whitebalance.png
+  Saved quantization: sonoma_photo_quantize.png
+  Saved hue shift: sonoma_photo_hueshift.png
+  Saved chroma key: sonoma_photo_chromakey.png
+
+--- circles (256x256) ---
+  RMSE RGB->HSV->RGB:    0,0000
+  RMSE RGB->YCbCr->RGB:  0,0000
+  RMSE RGB->CIELab->RGB: 0,0000
+  Saved histogram equalization: circles_histeq.png
+  Saved white balance: circles_whitebalance.png
+  Saved quantization: circles_quantize.png
+  Saved hue shift: circles_hueshift.png
+  Saved chroma key: circles_chromakey.png
+
+--- checker (256x256) ---
+  RMSE RGB->HSV->RGB:    0,0000
+  RMSE RGB->YCbCr->RGB:  0,0000
+  RMSE RGB->CIELab->RGB: 0,0000
+  Saved histogram equalization: checker_histeq.png
+  Saved white balance: checker_whitebalance.png
+  Saved quantization: checker_quantize.png
+  Saved hue shift: checker_hueshift.png
+  Saved chroma key: checker_chromakey.png
+
+--- Synthetic Chroma Key Demo ---
+  Saved chromakey_demo.png
+
+=== Done ===

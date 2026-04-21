@@ -121,23 +121,10 @@ public class Lab2 {
         return s;
     }
 
-    // Циклический сдвиг коэффициентов Хаара: DC из позиции (0,0) → центр,
-    // аналогично fftShift для FFT-спектра.
-    static double[][] haarShift2d(double[][] data) {
-        int H = data.length, W = data[0].length;
-        double[][] s = new double[H][W];
-        for (int y = 0; y < H; y++)
-            for (int x = 0; x < W; x++)
-                s[(y + H/2) % H][(x + W/2) % W] = data[y][x];
-        return s;
-    }
-
-    static double[] haarShift1d(double[] data) {
-        int n = data.length;
-        double[] s = new double[n];
-        for (int i = 0; i < n; i++) s[(i + n/2) % n] = data[i];
-        return s;
-    }
+    // Вейвлет-разложение Хаара не является периодическим, поэтому циклический
+    // сдвиг (как fftShift для FFT) здесь не применяется. Коэффициенты отображаются
+    // в их естественном порядке: DC и низкие частоты — в левом верхнем углу,
+    // высокочастотные детали — в остальных квадрантах пирамиды.
 
     static double[] haar1d(double[] signal, boolean inverse) {
         int n = nextPow2(signal.length);
@@ -251,13 +238,12 @@ public class Lab2 {
     }
 
     static void saveHaarSpectrum2d(double[][] haarCoeffs, String path) throws IOException {
-        double[][] shifted = haarShift2d(haarCoeffs);
-        int H = shifted.length, W = shifted[0].length;
+        int H = haarCoeffs.length, W = haarCoeffs[0].length;
         double maxLog = 0;
         double[][] logAbs = new double[H][W];
         for (int y = 0; y < H; y++)
             for (int x = 0; x < W; x++) {
-                logAbs[y][x] = Math.log(1 + Math.abs(shifted[y][x]));
+                logAbs[y][x] = Math.log(1 + Math.abs(haarCoeffs[y][x]));
                 if (logAbs[y][x] > maxLog) maxLog = logAbs[y][x];
             }
         BufferedImage img = new BufferedImage(W, H, BufferedImage.TYPE_INT_RGB);
@@ -343,14 +329,13 @@ public class Lab2 {
         g.setFont(new Font("SansSerif", Font.BOLD, 13));
         g.setColor(Color.BLACK);
         g.drawString(title, 10, 20);
-        double[] shiftedCoeffs = haarShift1d(haarCoeffs);
-        double[] logAmp = new double[shiftedCoeffs.length];
-        for (int i = 0; i < shiftedCoeffs.length; i++)
-            logAmp[i] = Math.log(1 + Math.abs(shiftedCoeffs[i]));
+        double[] logAmp = new double[haarCoeffs.length];
+        for (int i = 0; i < haarCoeffs.length; i++)
+            logAmp[i] = Math.log(1 + Math.abs(haarCoeffs[i]));
         drawPanel(g, original, 5, topPad, panW, panH - 30, leftPad,
                   "Сигнал", new Color(30, 100, 200));
         drawPanel(g, logAmp, W / 2 + 5, topPad, panW, panH - 30, leftPad,
-                  "Лог-амплитудный спектр Хаара (DC в центре)", new Color(150, 50, 200));
+                  "Лог-амплитудный спектр Хаара (DC слева, детали справа)", new Color(150, 50, 200));
         g.dispose();
         new File(path).getParentFile().mkdirs();
         ImageIO.write(img, "png", new File(path));
@@ -412,13 +397,12 @@ public class Lab2 {
                 int v = maxFft > 0 ? (int)(255 * fftLog[y][x] / maxFft) : 0;
                 fftImg.setRGB(x, y, v * 0x10101);
             }
-        double[][] haarShifted = haarShift2d(haarCoeffs);
-        int hH = haarShifted.length, hW = haarShifted[0].length;
+        int hH = haarCoeffs.length, hW = haarCoeffs[0].length;
         double maxHaar = 0;
         double[][] haarLog = new double[hH][hW];
         for (int y = 0; y < hH; y++)
             for (int x = 0; x < hW; x++) {
-                haarLog[y][x] = Math.log(1 + Math.abs(haarShifted[y][x]));
+                haarLog[y][x] = Math.log(1 + Math.abs(haarCoeffs[y][x]));
                 if (haarLog[y][x] > maxHaar) maxHaar = haarLog[y][x];
             }
         BufferedImage haarImg = new BufferedImage(hW, hH, BufferedImage.TYPE_INT_RGB);
@@ -440,7 +424,7 @@ public class Lab2 {
         g.setFont(new Font("SansSerif", Font.PLAIN, 11));
         g.drawString("Оригинал", 5, titleH + labelH - 3);
         g.drawString("Лог-амплитуда FFT (DC в центре)", srcW + pad + 5, titleH + labelH - 3);
-        g.drawString("Лог-амплитуда Хаара (DC в центре)", srcW + pad + fW + pad + 5, titleH + labelH - 3);
+        g.drawString("Лог-амплитуда Хаара (DC в углу, пирамида)", srcW + pad + fW + pad + 5, titleH + labelH - 3);
         g.drawImage(original, 0, titleH + labelH, null);
         g.drawImage(fftImg, srcW + pad, titleH + labelH, null);
         g.drawImage(haarImg, srcW + pad + fW + pad, titleH + labelH, null);

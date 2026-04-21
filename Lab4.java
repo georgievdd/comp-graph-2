@@ -251,21 +251,33 @@ public class Lab4 {
 
     static double[][] integralBoxFilter(double[][] src, int size) {
         int h = src.length, w = src[0].length;
-        int r = size/2;
-        // строим интегральное изображение
-        double[][] ii = new double[h+1][w+1];
-        for (int y = 0; y < h; y++)
-            for (int x = 0; x < w; x++)
-                ii[y+1][x+1] = src[y][x] + ii[y][x+1] + ii[y+1][x] - ii[y][x];
+        int r = size / 2;
+        // Зеркальное дополнение — чтобы граничная обработка совпадала с convolve().
+        int ph = h + 2*r, pw = w + 2*r;
+        double[][] padded = new double[ph][pw];
+        for (int y = 0; y < ph; y++)
+            for (int x = 0; x < pw; x++) {
+                int sy = Math.abs(y - r);
+                int sx = Math.abs(x - r);
+                if (sy >= h) sy = 2*h - sy - 2;
+                if (sx >= w) sx = 2*w - sx - 2;
+                sy = Math.max(0, Math.min(h-1, sy));
+                sx = Math.max(0, Math.min(w-1, sx));
+                padded[y][x] = src[sy][sx];
+            }
+        // Интегральное изображение по дополненному массиву.
+        double[][] ii = new double[ph+1][pw+1];
+        for (int y = 0; y < ph; y++)
+            for (int x = 0; x < pw; x++)
+                ii[y+1][x+1] = padded[y][x] + ii[y][x+1] + ii[y+1][x] - ii[y][x];
         double[][] out = new double[h][w];
-        double area = size*size;
+        double area = size * size;
         for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++) {
-                int y1 = Math.max(0, y-r), y2 = Math.min(h-1, y+r);
-                int x1 = Math.max(0, x-r), x2 = Math.min(w-1, x+r);
-                double s = ii[y2+1][x2+1] - ii[y1][x2+1] - ii[y2+1][x1] + ii[y1][x1];
-                int cnt = (y2-y1+1)*(x2-x1+1);
-                out[y][x] = s/cnt;
+                // Окно [y..y+size-1][x..x+size-1] в padded-координатах.
+                int y2 = y + size, x2 = x + size;
+                double s = ii[y2][x2] - ii[y][x2] - ii[y2][x] + ii[y][x];
+                out[y][x] = s / area;
             }
         return out;
     }
