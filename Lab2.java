@@ -256,6 +256,91 @@ public class Lab2 {
         ImageIO.write(img, "png", new File(path));
     }
 
+    /**
+     * Сохраняет вейвлет-разложение Хаара с разметкой субполос.
+     *
+     * Что вычисляет алгоритм (т.н. «спектр Хаара»):
+     *   Это НЕ спектр в смысле Фурье. Дискретное вейвлет-преобразование Хаара
+     *   разлагает изображение по базисным функциям-«ступенькам» (не синусоидам)
+     *   на разных масштабах (уровнях разложения).
+     *
+     *   На каждом уровне для каждой пары соседних значений вычисляются:
+     *     аппроксимирующий коэффициент = (a + b) / √2  (локальное среднее, НЧ)
+     *     детализирующий коэффициент   = (a − b) / √2  (локальная разность, ВЧ)
+     *
+     *   Применяя это сначала по строкам, затем по столбцам, получаем четыре субполосы:
+     *     LL  — аппроксимация (уменьшенная копия изображения)
+     *     HL  — горизонтально-вариативные детали (реагирует на вертикальные рёбра)
+     *     LH  — вертикально-вариативные детали (реагирует на горизонтальные рёбра)
+     *     HH  — диагональные детали
+     *
+     *   Отличие от FFT:
+     *     FFT: глобальное частотное разложение без пространственной локализации.
+     *     Хаар: многоуровневое разложение с ОДНОВРЕМЕННОЙ локализацией по пространству
+     *           и по масштабу. Коэффициенты = разности яркостей в блоках разного размера,
+     *           а не амплитуды синусоид.
+     *
+     *   Структура пирамиды (дерево Маллата):
+     *     Верхний левый угол → LL (аппроксимация, самый грубый уровень — один пиксель).
+     *     Вокруг него кольцами → субполосы HL/LH/HH от грубого к мелкому масштабу.
+     *     Самое внешнее кольцо (HL1, LH1, HH1) → самый мелкий масштаб (самые высокие «частоты»).
+     */
+    static void saveHaarWaveletDiagram(double[][] haarCoeffs, String path, String name) throws IOException {
+        int H = haarCoeffs.length, W = haarCoeffs[0].length;
+        double maxLog = 0;
+        double[][] logAbs = new double[H][W];
+        for (int y = 0; y < H; y++)
+            for (int x = 0; x < W; x++) {
+                logAbs[y][x] = Math.log(1 + Math.abs(haarCoeffs[y][x]));
+                if (logAbs[y][x] > maxLog) maxLog = logAbs[y][x];
+            }
+        int titleH = 22;
+        BufferedImage img = new BufferedImage(W, H + titleH, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = img.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setColor(Color.BLACK);
+        g.fillRect(0, 0, W, H + titleH);
+        for (int y = 0; y < H; y++)
+            for (int x = 0; x < W; x++) {
+                int v = maxLog > 0 ? (int)(255 * logAbs[y][x] / maxLog) : 0;
+                img.setRGB(x, y + titleH, v * 0x10101);
+            }
+        // Рисуем границы субполос и подписи (от мелкого масштаба к крупному)
+        g.setStroke(new BasicStroke(1f));
+        int lH = H, lW = W, lv = 1;
+        while (lH >= 4 && lW >= 4) {
+            int hh = lH / 2, hw = lW / 2;
+            g.setColor(new Color(200, 50, 50));
+            g.drawLine(0, titleH + hh, lW, titleH + hh);
+            g.drawLine(hw, titleH, hw, titleH + lH);
+            if (hh >= 24 && hw >= 24) {
+                int fs = Math.max(8, Math.min(11, Math.min(hh, hw) / 6));
+                g.setFont(new Font("Monospaced", Font.BOLD, fs));
+                // HL: top-right (горизонтально-вариативные детали → вертикальные рёбра)
+                g.setColor(new Color(255, 200, 80));
+                g.drawString("HL" + lv, hw + 3, titleH + fs + 3);
+                // LH: bottom-left (вертикально-вариативные детали → горизонтальные рёбра)
+                g.setColor(new Color(80, 220, 80));
+                g.drawString("LH" + lv, 3, titleH + hh + fs + 3);
+                // HH: bottom-right (диагональные детали)
+                g.setColor(new Color(80, 160, 255));
+                g.drawString("HH" + lv, hw + 3, titleH + hh + fs + 3);
+            }
+            lH = hh; lW = hw; lv++;
+        }
+        if (lH >= 4) {
+            g.setColor(Color.CYAN);
+            g.setFont(new Font("Monospaced", Font.BOLD, 8));
+            g.drawString("LL", 2, titleH + 9);
+        }
+        g.setColor(Color.WHITE);
+        g.setFont(new Font("SansSerif", Font.BOLD, 11));
+        g.drawString(name + " — вейвлет-коэффициенты Хаара (пирамида субполос)", 3, titleH - 5);
+        g.dispose();
+        new File(path).getParentFile().mkdirs();
+        ImageIO.write(img, "png", new File(path));
+    }
+
     private static void drawPanel(Graphics2D g, double[] values,
                                   int px, int py, int pw, int ph, int lpad,
                                   String label, Color color) {
@@ -424,7 +509,7 @@ public class Lab2 {
         g.setFont(new Font("SansSerif", Font.PLAIN, 11));
         g.drawString("Оригинал", 5, titleH + labelH - 3);
         g.drawString("Лог-амплитуда FFT (DC в центре)", srcW + pad + 5, titleH + labelH - 3);
-        g.drawString("Лог-амплитуда Хаара (DC в углу, пирамида)", srcW + pad + fW + pad + 5, titleH + labelH - 3);
+        g.drawString("Вейвлет-коэфф. Хаара (LL↖  HL↗ / LH↙  HH↘)", srcW + pad + fW + pad + 5, titleH + labelH - 3);
         g.drawImage(original, 0, titleH + labelH, null);
         g.drawImage(fftImg, srcW + pad, titleH + labelH, null);
         g.drawImage(haarImg, srcW + pad + fW + pad, titleH + labelH, null);
@@ -470,8 +555,43 @@ public class Lab2 {
         new File(outDir).mkdirs();
 
         PrintWriter log = new PrintWriter(new FileWriter(outDir + "/log.txt", false));
-        log.println("Лабораторная работа №2: Преобразование Фурье");
+        log.println("Лабораторная работа №2: Преобразование Фурье и вейвлет-разложение Хаара");
         log.println("Дата: " + new java.util.Date());
+        log.println();
+        log.println("=== ЧТО ВЫЧИСЛЯЕТ АЛГОРИТМ «СПЕКТРА ХААРА» ===");
+        log.println();
+        log.println("Термин «спектр Хаара» — условный. На самом деле реализовано дискретное");
+        log.println("вейвлет-преобразование Хаара (Haar Discrete Wavelet Transform, DWT).");
+        log.println();
+        log.println("Фурье-спектр показывает амплитуду каждой ЧАСТОТЫ (глобально по всему сигналу).");
+        log.println("Вейвлет-преобразование показывает локальные изменения яркости на разных МАСШТАБАХ.");
+        log.println();
+        log.println("Алгоритм (1D, один уровень):");
+        log.println("  Для каждой пары соседних отсчётов a[2i], a[2i+1]:");
+        log.println("    аппроксим. коэфф.  s[i] = (a[2i] + a[2i+1]) / √2   (НЧ, «сумма»)");
+        log.println("    детализир. коэфф.  d[i] = (a[2i] - a[2i+1]) / √2   (ВЧ, «разность»)");
+        log.println("  Затем алгоритм рекурсивно применяется к массиву s[i] → многоуровневое разложение.");
+        log.println();
+        log.println("Для 2D-изображения преобразование применяется строчно, затем столбцово.");
+        log.println("На каждом уровне разложения возникают 4 субполосы (квадранты):");
+        log.println("  LL  (верхний левый)  — аппроксимация: уменьшенная версия изображения");
+        log.println("  HL  (верхний правый) — детали вдоль оси X → чувствителен к вертикальным рёбрам");
+        log.println("  LH  (нижний левый)   — детали вдоль оси Y → чувствителен к горизонтальным рёбрам");
+        log.println("  HH  (нижний правый)  — диагональные детали");
+        log.println();
+        log.println("Структура пирамиды (дерево Маллата):");
+        log.println("  Полное преобразование рекурсивно разлагает субполосу LL.");
+        log.println("  В итоге LL сжимается до 1 пикселя (DC-компонента = среднее всего изображения).");
+        log.println("  Вокруг него — кольца субполос: от крупного масштаба (соседние с DC)");
+        log.println("                                  до мелкого (самые внешние HL1/LH1/HH1).");
+        log.println();
+        log.println("Ключевое отличие от FFT:");
+        log.println("  FFT    — глобально, нет пространственной локализации (не знает, ГДЕ в изображении");
+        log.println("           находится та или иная частота).");
+        log.println("  Хаар   — одновременно пространственная И масштабная локализация.");
+        log.println("           Коэффициент d[i] на уровне k = насколько сильно меняется яркость");
+        log.println("           в блоке размером 2^k пикселей, расположенном В КОНКРЕТНОМ МЕСТЕ изображения.");
+        log.println("=================================================");
         log.println();
 
         // 1D FFT
@@ -547,7 +667,7 @@ public class Lab2 {
             saveDoubleImage(recReal, outDir + "/" + photoNames[i] + "_ifft.png");
 
             double[][] haar = haar2d(dbl, false);
-            saveHaarSpectrum2d(haar, outDir + "/" + photoNames[i] + "_haar.png");
+            saveHaarWaveletDiagram(haar, outDir + "/" + photoNames[i] + "_haar.png", photoNames[i]);
             saveSpectraComparison(img, spec, haar,
                 outDir + "/" + photoNames[i] + "_spectra_comparison.png", photoNames[i]);
         }

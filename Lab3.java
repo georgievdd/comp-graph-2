@@ -368,20 +368,16 @@ public class Lab3 {
             double[][] rotBC = rotate(src, angle, Method.BICUBIC, true);
             t1 = System.nanoTime(); long msBC = (t1-t0)/1_000_000;
 
-            // PSNR — сравниваем NN и BC с Bilinear как эталоном
-            int ch = Math.min(rotNN.length, Math.min(rotBL.length, rotBC.length));
-            int cw = Math.min(rotNN[0].length, Math.min(rotBL[0].length, rotBC[0].length));
-            double[][] crNN = cropCenter(rotNN, ch, cw);
-            double[][] crBL = cropCenter(rotBL, ch, cw);
-            double[][] crBC = cropCenter(rotBC, ch, cw);
-
-            double pNN_BL = psnr(crBL, crNN);
-            double pBC_BL = psnr(crBL, crBC);
+            // PSNR туда-обратно: rotate(+angle) → rotate(-angle) → сравниваем с оригиналом.
+            // Это показывает, насколько метод сохраняет изображение при геометрическом преобразовании.
+            // Используем expand=false чтобы размеры совпадали с src.
+            double pNN = psnr(src, rotate(rotate(src, angle, Method.NN,       false), -angle, Method.NN,       false));
+            double pBL = psnr(src, rotate(rotate(src, angle, Method.BILINEAR, false), -angle, Method.BILINEAR, false));
+            double pBC = psnr(src, rotate(rotate(src, angle, Method.BICUBIC,  false), -angle, Method.BICUBIC,  false));
 
             log.println(String.format(
-                "    %5.0f°  NN: %4dms  Bilinear: %4dms  Bicubic: %4dms" +
-                "  PSNR(BL/NN)=%5.1fdB  PSNR(BL/BC)=%5.1fdB",
-                angle, msNN, msBL, msBC, pNN_BL, pBC_BL));
+                "    %5.0f°  NN: %4dms PSNR(туда-обр)=%5.1fdB | BL: %4dms PSNR=%5.1fdB | BC: %4dms PSNR=%5.1fdB",
+                angle, msNN, pNN, msBL, pBL, msBC, pBC));
 
             // Сохранить сравнение
             String angleStr = String.format("%03.0f", angle);
@@ -439,7 +435,8 @@ public class Lab3 {
         // Build double[][] for PSNR
         double[][] inSitu2D = new double[h][w];
         for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) inSitu2D[y][x] = inSitu[y][x];
-        log.println(String.format("    PSNR(in-situ vs bilinear): %.2f dB", psnr(inSitu2D, rotBL45)));
+        log.println(String.format("    PSNR(in-situ vs билинейная, оба — прямой поворот 45°): %.2f dB",
+                psnr(inSitu2D, rotBL45)));
 
         BufferedImage inSituImg = toBufferedImage(inSitu);
         BufferedImage inSituCmp = makeComparisonRow(
@@ -462,6 +459,27 @@ public class Lab3 {
         PrintWriter log = new PrintWriter(new FileWriter(outDir + "/log.txt", false));
         log.println("Лабораторная работа №3: Геометрические преобразования и интерполяция");
         log.println("Дата: " + new java.util.Date());
+        log.println();
+        log.println("=== ЧТО ПОКАЗЫВАЕТ PSNR В ДАННОЙ РАБОТЕ ===");
+        log.println();
+        log.println("PSNR (Peak Signal-to-Noise Ratio) — метрика качества восстановления изображения.");
+        log.println("Формула: PSNR = 10 · log10(255² / MSE), где MSE — среднеквадратическая погрешность.");
+        log.println("Чем выше PSNR (дБ), тем ближе результат к эталону. Ниже 25 дБ — заметные артефакты.");
+        log.println();
+        log.println("Методика измерения в данной работе:");
+        log.println("  1. Берём оригинальное изображение.");
+        log.println("  2. Поворачиваем на угол +θ методом интерполяции M.");
+        log.println("  3. Поворачиваем результат обратно на −θ тем же методом M.");
+        log.println("  4. Вычисляем PSNR между восстановленным изображением и оригиналом.");
+        log.println();
+        log.println("Что это показывает:");
+        log.println("  Двойной поворот (туда-обратно) в идеале должен давать исходное изображение.");
+        log.println("  Реально каждая интерполяция вносит погрешность (размытие, артефакты ступенек).");
+        log.println("  PSNR измеряет эту суммарную погрешность и позволяет сравнить методы:");
+        log.println("    Ближайший сосед (NN)  — быстрый, но ступенчатые артефакты → низкий PSNR");
+        log.println("    Билинейная (BL)        — гладкий результат, некоторое размытие → средний PSNR");
+        log.println("    Бикубическая (BC)      — лучшее сохранение деталей → высокий PSNR");
+        log.println("=================================================");
         log.println();
 
         String[] paths = {

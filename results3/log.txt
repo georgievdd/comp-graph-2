@@ -1,74 +1,95 @@
 Лабораторная работа №3: Геометрические преобразования и интерполяция
-Дата: Tue Apr 21 02:38:16 MSK 2026
+Дата: Sat Apr 25 20:38:03 MSK 2026
+
+=== ЧТО ПОКАЗЫВАЕТ PSNR В ДАННОЙ РАБОТЕ ===
+
+PSNR (Peak Signal-to-Noise Ratio) — метрика качества восстановления изображения.
+Формула: PSNR = 10 · log10(255² / MSE), где MSE — среднеквадратическая погрешность.
+Чем выше PSNR (дБ), тем ближе результат к эталону. Ниже 25 дБ — заметные артефакты.
+
+Методика измерения в данной работе:
+  1. Берём оригинальное изображение.
+  2. Поворачиваем на угол +θ методом интерполяции M.
+  3. Поворачиваем результат обратно на −θ тем же методом M.
+  4. Вычисляем PSNR между восстановленным изображением и оригиналом.
+
+Что это показывает:
+  Двойной поворот (туда-обратно) в идеале должен давать исходное изображение.
+  Реально каждая интерполяция вносит погрешность (размытие, артефакты ступенек).
+  PSNR измеряет эту суммарную погрешность и позволяет сравнить методы:
+    Ближайший сосед (NN)  — быстрый, но ступенчатые артефакты → низкий PSNR
+    Билинейная (BL)        — гладкий результат, некоторое размытие → средний PSNR
+    Бикубическая (BC)      — лучшее сохранение деталей → высокий PSNR
+=================================================
 
 === baboon (200×200) ===
   Поворот:
-       30°  NN:    4ms  Bilinear:    3ms  Bicubic:   10ms  PSNR(BL/NN)= 31,5dB  PSNR(BL/BC)= 41,8dB
-       45°  NN:    0ms  Bilinear:    0ms  Bicubic:    2ms  PSNR(BL/NN)= 32,4dB  PSNR(BL/BC)= 42,0dB
-       90°  NN:    0ms  Bilinear:    0ms  Bicubic:    1ms  PSNR(BL/NN)=100,0dB  PSNR(BL/BC)=100,0dB
-      135°  NN:    0ms  Bilinear:    0ms  Bicubic:    2ms  PSNR(BL/NN)= 32,4dB  PSNR(BL/BC)= 42,0dB
+       30°  NN:    4ms PSNR(туда-обр)= 13,5dB | BL:    3ms PSNR= 13,5dB | BC:   13ms PSNR= 13,6dB
+       45°  NN:    0ms PSNR(туда-обр)= 13,2dB | BL:    0ms PSNR= 13,2dB | BC:    2ms PSNR= 13,3dB
+       90°  NN:    0ms PSNR(туда-обр)=100,0dB | BL:    0ms PSNR=100,0dB | BC:    1ms PSNR=100,0dB
+      135°  NN:    0ms PSNR(туда-обр)= 13,2dB | BL:    0ms PSNR= 13,2dB | BC:    2ms PSNR= 13,3dB
   Скос (shear X = 0.5):
     Сохранено.
   Поворот 45° + масштаб ×1.5:
     Сохранено.
   Поворот in-situ (3 скоса, 45°):
-    PSNR(in-situ vs bilinear): 19,25 dB
+    PSNR(in-situ vs билинейная, оба — прямой поворот 45°): 19,25 dB
     Сохранено.
 
 === checker (256×256) ===
   Поворот:
-       30°  NN:    0ms  Bilinear:    0ms  Bicubic:    3ms  PSNR(BL/NN)= 25,5dB  PSNR(BL/BC)= 36,8dB
-       45°  NN:    0ms  Bilinear:    0ms  Bicubic:    3ms  PSNR(BL/NN)= 25,6dB  PSNR(BL/BC)= 37,2dB
-       90°  NN:    0ms  Bilinear:    0ms  Bicubic:    1ms  PSNR(BL/NN)= 18,2dB  PSNR(BL/BC)= 33,2dB
-      135°  NN:    0ms  Bilinear:    1ms  Bicubic:    3ms  PSNR(BL/NN)= 25,6dB  PSNR(BL/BC)= 37,2dB
+       30°  NN:    0ms PSNR(туда-обр)= 10,9dB | BL:    0ms PSNR= 11,0dB | BC:    3ms PSNR= 11,1dB
+       45°  NN:    0ms PSNR(туда-обр)= 10,5dB | BL:    0ms PSNR= 10,5dB | BC:    3ms PSNR= 10,6dB
+       90°  NN:    0ms PSNR(туда-обр)=100,0dB | BL:    0ms PSNR=100,0dB | BC:    1ms PSNR=100,0dB
+      135°  NN:    0ms PSNR(туда-обр)= 10,5dB | BL:    0ms PSNR= 10,5dB | BC:    3ms PSNR= 10,6dB
   Скос (shear X = 0.5):
     Сохранено.
   Поворот 45° + масштаб ×1.5:
     Сохранено.
   Поворот in-situ (3 скоса, 45°):
-    PSNR(in-situ vs bilinear): 17,36 dB
+    PSNR(in-situ vs билинейная, оба — прямой поворот 45°): 17,36 dB
     Сохранено.
 
 === circles (256×256) ===
   Поворот:
-       30°  NN:    0ms  Bilinear:    1ms  Bicubic:    3ms  PSNR(BL/NN)= 40,9dB  PSNR(BL/BC)= 52,1dB
-       45°  NN:    0ms  Bilinear:    1ms  Bicubic:    3ms  PSNR(BL/NN)= 40,6dB  PSNR(BL/BC)= 52,3dB
-       90°  NN:    0ms  Bilinear:    0ms  Bicubic:    1ms  PSNR(BL/NN)= 34,0dB  PSNR(BL/BC)= 48,1dB
-      135°  NN:    0ms  Bilinear:    1ms  Bicubic:    3ms  PSNR(BL/NN)= 40,6dB  PSNR(BL/BC)= 52,3dB
+       30°  NN:    0ms PSNR(туда-обр)= 21,5dB | BL:    0ms PSNR= 21,6dB | BC:    3ms PSNR= 21,6dB
+       45°  NN:    0ms PSNR(туда-обр)= 20,7dB | BL:    0ms PSNR= 20,7dB | BC:    3ms PSNR= 20,7dB
+       90°  NN:    0ms PSNR(туда-обр)=100,0dB | BL:    0ms PSNR=100,0dB | BC:    1ms PSNR=100,0dB
+      135°  NN:    0ms PSNR(туда-обр)= 20,7dB | BL:    0ms PSNR= 20,7dB | BC:    3ms PSNR= 20,7dB
   Скос (shear X = 0.5):
     Сохранено.
   Поворот 45° + масштаб ×1.5:
     Сохранено.
   Поворот in-situ (3 скоса, 45°):
-    PSNR(in-situ vs bilinear): 31,22 dB
+    PSNR(in-situ vs билинейная, оба — прямой поворот 45°): 31,22 dB
     Сохранено.
 
 === gradient (256×256) ===
   Поворот:
-       30°  NN:    0ms  Bilinear:    0ms  Bicubic:    6ms  PSNR(BL/NN)= 35,4dB  PSNR(BL/BC)= 46,8dB
-       45°  NN:    0ms  Bilinear:    0ms  Bicubic:    3ms  PSNR(BL/NN)= 32,6dB  PSNR(BL/BC)= 47,1dB
-       90°  NN:    0ms  Bilinear:    0ms  Bicubic:    1ms  PSNR(BL/NN)= 27,9dB  PSNR(BL/BC)= 45,9dB
-      135°  NN:    0ms  Bilinear:    0ms  Bicubic:    3ms  PSNR(BL/NN)= 32,6dB  PSNR(BL/BC)= 47,1dB
+       30°  NN:    0ms PSNR(туда-обр)= 11,9dB | BL:    0ms PSNR= 11,9dB | BC:    3ms PSNR= 11,9dB
+       45°  NN:    0ms PSNR(туда-обр)= 11,5dB | BL:    0ms PSNR= 11,5dB | BC:    3ms PSNR= 11,5dB
+       90°  NN:    0ms PSNR(туда-обр)=100,0dB | BL:    0ms PSNR=100,0dB | BC:    1ms PSNR=100,0dB
+      135°  NN:    0ms PSNR(туда-обр)= 11,5dB | BL:    0ms PSNR= 11,5dB | BC:    3ms PSNR= 11,5dB
   Скос (shear X = 0.5):
     Сохранено.
   Поворот 45° + масштаб ×1.5:
     Сохранено.
   Поворот in-situ (3 скоса, 45°):
-    PSNR(in-situ vs bilinear): 18,55 dB
+    PSNR(in-situ vs билинейная, оба — прямой поворот 45°): 18,55 dB
     Сохранено.
 
 === sonoma_photo (256×256) ===
   Поворот:
-       30°  NN:    0ms  Bilinear:    0ms  Bicubic:    3ms  PSNR(BL/NN)= 36,6dB  PSNR(BL/BC)= 48,1dB
-       45°  NN:    0ms  Bilinear:    0ms  Bicubic:    3ms  PSNR(BL/NN)= 34,1dB  PSNR(BL/BC)= 48,4dB
-       90°  NN:    0ms  Bilinear:    0ms  Bicubic:    1ms  PSNR(BL/NN)= 29,3dB  PSNR(BL/BC)= 46,8dB
-      135°  NN:    0ms  Bilinear:    0ms  Bicubic:    3ms  PSNR(BL/NN)= 34,1dB  PSNR(BL/BC)= 48,4dB
+       30°  NN:    0ms PSNR(туда-обр)= 12,8dB | BL:    0ms PSNR= 12,8dB | BC:    3ms PSNR= 12,8dB
+       45°  NN:    0ms PSNR(туда-обр)= 12,7dB | BL:    0ms PSNR= 12,7dB | BC:    3ms PSNR= 12,7dB
+       90°  NN:    0ms PSNR(туда-обр)=100,0dB | BL:    0ms PSNR=100,0dB | BC:    1ms PSNR=100,0dB
+      135°  NN:    0ms PSNR(туда-обр)= 12,7dB | BL:    0ms PSNR= 12,7dB | BC:    3ms PSNR= 12,7dB
   Скос (shear X = 0.5):
     Сохранено.
   Поворот 45° + масштаб ×1.5:
     Сохранено.
   Поворот in-situ (3 скоса, 45°):
-    PSNR(in-situ vs bilinear): 19,27 dB
+    PSNR(in-situ vs билинейная, оба — прямой поворот 45°): 19,27 dB
     Сохранено.
 
 Все результаты сохранены в results3/
