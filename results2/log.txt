@@ -1,5 +1,5 @@
 Лабораторная работа №2: Преобразование Фурье и вейвлет-разложение Хаара
-Дата: Sat Apr 25 20:37:58 MSK 2026
+Дата: Fri May 08 02:55:49 MSK 2026
 
 === ЧТО ВЫЧИСЛЯЕТ АЛГОРИТМ «СПЕКТРА ХААРА» ===
 
@@ -38,15 +38,15 @@
 
   Сигнал 1: RMSE(IFFT) = 4,14e-15
   Сигнал 2: RMSE(IFFT) = 1,17e-14
-  sin_horizontal: RMSE(IFFT) = 1,38e-13
-  sin_vertical: RMSE(IFFT) = 1,38e-13
-  sin_diagonal: RMSE(IFFT) = 3,61e-13
+  sin_horizontal: RMSE(IFFT) = 1,37e-13
+  sin_vertical: RMSE(IFFT) = 1,37e-13
+  sin_diagonal: RMSE(IFFT) = 3,56e-13
   sin_mix: RMSE(IFFT) = 1,34e-13
   checker: 256x256, RMSE(IFFT)=4,88e-13
   gradient: 256x256, RMSE(IFFT)=2,31e-13
   circles: 256x256, RMSE(IFFT)=2,53e-13
   baboon: 200x200, RMSE(IFFT)=2,88e-13
   sonoma_photo: 256x256, RMSE(IFFT)=1,82e-13
-  Сигнал 1: RMSE(обратный Хаар) = 4,12e-16
+  Сигнал 1: RMSE(обратный Хаар) = 4,13e-16
 
 Всё сохранено в results2/

@@ -403,6 +403,273 @@ public class Lab2 {
         ImageIO.write(img, "png", new File(path));
     }
 
+    /**
+     * Энергетический спектр Хаара для 1D сигнала: диаграмма «среднее |коэф.| vs уровень разложения».
+     *
+     * Уровень k соответствует частотному диапазону [2^(k-2)/N, 2^(k-1)/N] от Найквиста.
+     * Уровень 1 = самый грубый (низкочастотный), уровень L = самый мелкий (высокочастотный).
+     * DC (нулевой уровень) отображается отдельно левее.
+     *
+     * Это аналог амплитудного спектра FFT, но вместо отдельных частот — октавные полосы.
+     */
+    static void saveHaarAmplitudeSpectrum1d(double[] haarCoeffs, double[] original,
+                                            String path, String title) throws IOException {
+        int n = haarCoeffs.length;
+        int L = 0; { int tmp = n; while (tmp > 1) { tmp >>= 1; L++; } }  // L = log2(n)
+
+        // Вычислить среднее |коэффициент| на каждом уровне
+        double dc = Math.abs(haarCoeffs[0]);
+        double[] levelAmp = new double[L];
+        for (int k = 1; k <= L; k++) {
+            int start = 1 << (k-1);                       // 2^(k-1)
+            int end   = Math.min(1 << k, n);              // 2^k, но не больше n
+            double sum = 0; int cnt = 0;
+            for (int i = start; i < end; i++) { sum += Math.abs(haarCoeffs[i]); cnt++; }
+            levelAmp[k-1] = cnt > 0 ? sum / cnt : 0;
+        }
+
+        int W = 820, H = 420;
+        int leftPad = 60, rightPad = 20, topPad = 50, botPad = 50;
+        int plotW = W - leftPad - rightPad;
+        int plotH = H - topPad - botPad;
+        BufferedImage img = new BufferedImage(W, H, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = img.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setColor(Color.WHITE); g.fillRect(0, 0, W, H);
+
+        // Заголовок
+        g.setFont(new Font("SansSerif", Font.BOLD, 12));
+        g.setColor(Color.BLACK);
+        g.drawString(title, leftPad, topPad - 28);
+        g.setFont(new Font("SansSerif", Font.PLAIN, 10));
+        g.drawString("Энергетический спектр Хаара: среднее |коэффициент| по уровням разложения", leftPad, topPad - 12);
+
+        // Оси
+        g.setColor(Color.DARK_GRAY);
+        g.drawLine(leftPad, topPad, leftPad, topPad + plotH);
+        g.drawLine(leftPad, topPad + plotH, leftPad + plotW, topPad + plotH);
+        g.setFont(new Font("SansSerif", Font.PLAIN, 9));
+        g.drawString("Среднее |коэф.|", 4, topPad + plotH/2);
+        g.drawString("Уровень разложения (1=грубый/НЧ → L=мелкий/ВЧ)", leftPad + plotW/4, H - 8);
+
+        // Найти максимум для масштабирования оси Y (включая DC)
+        double maxAmp = dc;
+        for (double v : levelAmp) if (v > maxAmp) maxAmp = v;
+        if (maxAmp < 1e-10) maxAmp = 1.0;
+
+        // Сетка и подписи оси Y
+        g.setColor(new Color(200, 200, 200));
+        for (int tick = 0; tick <= 5; tick++) {
+            int gy = topPad + plotH - (int)(tick * plotH / 5.0);
+            g.drawLine(leftPad, gy, leftPad + plotW, gy);
+            g.setColor(Color.DARK_GRAY);
+            g.drawString(String.format("%.1f", maxAmp * tick / 5.0), 2, gy + 4);
+            g.setColor(new Color(200, 200, 200));
+        }
+
+        // Всего столбцов: 1 (DC) + L уровней
+        int totalBars = 1 + L;
+        int barWidth = Math.max(4, plotW / (totalBars + 1) - 2);
+        int barGap   = Math.max(1, (plotW - totalBars * barWidth) / (totalBars + 1));
+
+        // DC столбец (синий)
+        int bx = leftPad + barGap;
+        int bh = (int)(dc / maxAmp * plotH);
+        g.setColor(new Color(30, 80, 220));
+        g.fillRect(bx, topPad + plotH - bh, barWidth, bh);
+        g.setColor(Color.DARK_GRAY);
+        g.drawString("DC", bx, topPad + plotH + 12);
+        bx += barWidth + barGap;
+
+        // Столбцы уровней (градиент от синего к красному = от НЧ к ВЧ)
+        for (int k = 0; k < L; k++) {
+            bh = (int)(levelAmp[k] / maxAmp * plotH);
+            float hue = 0.66f - 0.66f * k / Math.max(1, L - 1);  // blue→red
+            g.setColor(Color.getHSBColor(hue, 0.85f, 0.85f));
+            g.fillRect(bx, topPad + plotH - bh, barWidth, bh);
+            g.setColor(Color.DARK_GRAY);
+            if (barWidth >= 12)
+                g.drawString("L" + (k+1), bx + 1, topPad + plotH + 12);
+            bx += barWidth + barGap;
+        }
+
+        // Подписи «НЧ» и «ВЧ»
+        g.setFont(new Font("SansSerif", Font.ITALIC, 10));
+        g.setColor(new Color(30, 80, 220));
+        g.drawString("← НЧ", leftPad + barGap + barWidth + barGap, topPad + plotH + 25);
+        g.setColor(new Color(200, 50, 50));
+        g.drawString("ВЧ →", leftPad + plotW - 35, topPad + plotH + 25);
+
+        // Справа: кривая оригинального сигнала (миниатюра)
+        g.dispose();
+        new File(path).getParentFile().mkdirs();
+        ImageIO.write(img, "png", new File(path));
+    }
+
+    /**
+     * Энергетический спектр Хаара для 2D изображения.
+     *
+     * Для каждого уровня k (k=1..L) и трёх субполос (HL, LH, HH) вычисляется среднее |коэф.|.
+     * Результат: диаграмма с группами столбцов по уровням, раскрашенных по субполосам.
+     *
+     * Уровень 1 = грубый (НЧ), уровень L = мелкий (ВЧ).
+     * В стандартной пирамиде Маллата субполоса HL_k занимает строки 0..H/2^k-1,
+     * столбцы H/2^(k-1)..H/2^k-1.
+     * Однако в данной реализации haar2d применяет полное haar1d к каждой строке
+     * и каждому столбцу независимо, поэтому уровень (row_level, col_level) задаётся
+     * отдельно по строкам и столбцам через haarLevel1d(i).
+     *
+     * Здесь мы группируем коэффициенты по max(row_level, col_level) для построения
+     * «радиального» спектра (аналог кольцеобразных зон в FFT-спектре).
+     */
+    static void saveHaarAmplitudeSpectrum2d(double[][] haarCoeffs,
+                                            String path, String name) throws IOException {
+        int H = haarCoeffs.length, W = haarCoeffs[0].length;
+        int LH = 0; { int t = H; while (t > 1) { t >>= 1; LH++; } }
+        int LW = 0; { int t = W; while (t > 1) { t >>= 1; LW++; } }
+        int L = Math.min(LH, LW);
+
+        // haarLevel1d(i): уровень 1D-коэффициента с индексом i
+        // i=0 → 0 (DC), i=1 → 1, i=2,3 → 2, ..., i=2^(k-1)..2^k-1 → k
+        // Для "радиального" спектра: объединяем по max(levelRow, levelCol)
+
+        // Инициализируем накопители для 3 субполос × L уровней
+        // Чтобы различить HL / LH / HH, используем:
+        //   HL: col_level > 0, row_level == 0
+        //   LH: row_level > 0, col_level == 0
+        //   HH: row_level > 0, col_level > 0
+        //   DC: row_level == 0, col_level == 0
+        double[] sumHL = new double[L+1], sumLH = new double[L+1], sumHH = new double[L+1];
+        int[]    cntHL = new int[L+1],    cntLH = new int[L+1],    cntHH = new int[L+1];
+        double dcVal = 0; int dcCnt = 0;
+
+        for (int y = 0; y < H; y++) {
+            int rl = haarLevel1d(y);
+            for (int x = 0; x < W; x++) {
+                int cl = haarLevel1d(x);
+                double v = Math.abs(haarCoeffs[y][x]);
+                if (rl == 0 && cl == 0) { dcVal += v; dcCnt++; }
+                else {
+                    int lv = Math.max(rl, cl);
+                    if (lv > L) lv = L;
+                    if (rl == 0 && cl > 0) { sumHL[lv] += v; cntHL[lv]++; }
+                    else if (rl > 0 && cl == 0) { sumLH[lv] += v; cntLH[lv]++; }
+                    else { sumHH[lv] += v; cntHH[lv]++; }
+                }
+            }
+        }
+
+        int W2 = 860, H2 = 440;
+        int leftPad = 60, rightPad = 20, topPad = 55, botPad = 55;
+        int plotW2 = W2 - leftPad - rightPad;
+        int plotH2 = H2 - topPad - botPad;
+        BufferedImage img = new BufferedImage(W2, H2, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = img.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setColor(Color.WHITE); g.fillRect(0, 0, W2, H2);
+
+        g.setFont(new Font("SansSerif", Font.BOLD, 12));
+        g.setColor(Color.BLACK);
+        g.drawString(name + " — Энергетический спектр Хаара (среднее |коэф.| по субполосам и уровням)", leftPad, topPad - 30);
+        g.setFont(new Font("SansSerif", Font.PLAIN, 10));
+        g.drawString("Уровень 1 = грубый (НЧ)  →  Уровень " + L + " = мелкий (ВЧ)", leftPad, topPad - 14);
+
+        // Оси
+        g.setColor(Color.DARK_GRAY);
+        g.drawLine(leftPad, topPad, leftPad, topPad + plotH2);
+        g.drawLine(leftPad, topPad + plotH2, leftPad + plotW2, topPad + plotH2);
+        g.setFont(new Font("SansSerif", Font.PLAIN, 9));
+        g.drawString("Среднее |коэф.|", 4, topPad + plotH2/2);
+        g.drawString("Уровень разложения (радиальный, 1=НЧ → " + L + "=ВЧ)", leftPad + plotW2/4, H2 - 8);
+
+        // Максимум для масштабирования
+        double maxV = dcCnt > 0 ? dcVal/dcCnt : 0;
+        for (int k = 1; k <= L; k++) {
+            if (cntHL[k] > 0) maxV = Math.max(maxV, sumHL[k]/cntHL[k]);
+            if (cntLH[k] > 0) maxV = Math.max(maxV, sumLH[k]/cntLH[k]);
+            if (cntHH[k] > 0) maxV = Math.max(maxV, sumHH[k]/cntHH[k]);
+        }
+        if (maxV < 1e-10) maxV = 1.0;
+
+        // Сетка
+        g.setColor(new Color(200, 200, 200));
+        for (int tick = 0; tick <= 5; tick++) {
+            int gy = topPad + plotH2 - (int)(tick * plotH2 / 5.0);
+            g.drawLine(leftPad, gy, leftPad + plotW2, gy);
+            g.setColor(Color.DARK_GRAY);
+            g.drawString(String.format("%.1f", maxV * tick / 5.0), 2, gy + 4);
+            g.setColor(new Color(200, 200, 200));
+        }
+
+        // Группы столбцов: DC + L уровней, каждый уровень = 3 столбца (HL, LH, HH)
+        int groups = 1 + L;
+        int barsPerGroup = 3;
+        int groupW = plotW2 / (groups + 1);
+        int bw = Math.max(3, groupW / (barsPerGroup + 1));
+
+        Color cHL = new Color(220, 80, 50);   // красный  — HL (горизонтальные детали)
+        Color cLH = new Color(50, 180, 80);   // зелёный  — LH (вертикальные детали)
+        Color cHH = new Color(50, 100, 220);  // синий    — HH (диагональные детали)
+        Color cDC = new Color(150, 50, 220);  // фиолетовый — DC
+
+        int gx = leftPad + groupW/2;
+
+        // DC
+        {
+            double v = dcCnt > 0 ? dcVal/dcCnt : 0;
+            int bh = (int)(v / maxV * plotH2);
+            g.setColor(cDC);
+            g.fillRect(gx, topPad + plotH2 - bh, bw*2, bh);
+            g.setColor(Color.DARK_GRAY);
+            g.setFont(new Font("SansSerif", Font.PLAIN, 9));
+            g.drawString("DC", gx, topPad + plotH2 + 13);
+        }
+        gx += groupW;
+
+        for (int k = 1; k <= L; k++) {
+            double[] vals = {
+                cntHL[k] > 0 ? sumHL[k]/cntHL[k] : 0,
+                cntLH[k] > 0 ? sumLH[k]/cntLH[k] : 0,
+                cntHH[k] > 0 ? sumHH[k]/cntHH[k] : 0
+            };
+            Color[] cols = {cHL, cLH, cHH};
+            for (int b = 0; b < 3; b++) {
+                int bh = (int)(vals[b] / maxV * plotH2);
+                int bxb = gx + b * (bw + 1);
+                g.setColor(cols[b]);
+                g.fillRect(bxb, topPad + plotH2 - bh, bw, bh);
+            }
+            g.setColor(Color.DARK_GRAY);
+            g.setFont(new Font("SansSerif", Font.PLAIN, 9));
+            g.drawString("L" + k, gx + bw, topPad + plotH2 + 13);
+            gx += groupW;
+        }
+
+        // Легенда
+        int lx = leftPad + plotW2 - 170, ly = topPad + 10;
+        Color[] lc = {cHL, cLH, cHH, cDC};
+        String[] ln = {"HL (горизонт. детали)", "LH (вертик. детали)", "HH (диагон. детали)", "DC (ср. яркость)"};
+        for (int i = 0; i < 4; i++) {
+            g.setColor(lc[i]);
+            g.fillRect(lx, ly + i*14, 12, 10);
+            g.setColor(Color.BLACK);
+            g.setFont(new Font("SansSerif", Font.PLAIN, 9));
+            g.drawString(ln[i], lx + 15, ly + i*14 + 9);
+        }
+
+        g.dispose();
+        new File(path).getParentFile().mkdirs();
+        ImageIO.write(img, "png", new File(path));
+    }
+
+    /** Возвращает уровень разложения Хаара для 1D-индекса i. */
+    static int haarLevel1d(int i) {
+        if (i == 0) return 0;
+        int level = 0;
+        while ((1 << level) <= i) level++;
+        return level;
+    }
+
     static void saveHaarSpectrum1d(double[] haarCoeffs, double[] original,
                                    String path, String title) throws IOException {
         int W = 900, H = 420, panW = W / 2 - 10, panH = H - 70;
@@ -668,21 +935,28 @@ public class Lab2 {
 
             double[][] haar = haar2d(dbl, false);
             saveHaarWaveletDiagram(haar, outDir + "/" + photoNames[i] + "_haar.png", photoNames[i]);
+            saveHaarAmplitudeSpectrum2d(haar,
+                outDir + "/" + photoNames[i] + "_haar_spectrum.png", photoNames[i]);
             saveSpectraComparison(img, spec, haar,
                 outDir + "/" + photoNames[i] + "_spectra_comparison.png", photoNames[i]);
         }
 
-        // Haar 1D
+        // Haar 1D — коэффициенты и энергетический спектр
         double[] haarCoeffs1 = haar1d(sig1, false);
         saveHaarSpectrum1d(haarCoeffs1, sig1, outDir + "/signal1_haar.png",
-            "Спектр Хаара — Сигнал 1 (sin(50)+0.5·sin(120)+0.25·sin(300))");
+            "Вейвлет-коэффициенты Хаара — Сигнал 1");
+        saveHaarAmplitudeSpectrum1d(haarCoeffs1, sig1, outDir + "/signal1_haar_spectrum.png",
+            "Энергетический спектр Хаара — Сигнал 1 (sin(50)+0.5·sin(120)+0.25·sin(300))");
         double[] recHaar1 = haar1d(haarCoeffs1, true);
         double errH = 0;
         for (int i = 0; i < N; i++) { double d = sig1[i] - recHaar1[i]; errH += d*d; }
         log.println(String.format("  Сигнал 1: RMSE(обратный Хаар) = %.2e", Math.sqrt(errH / N)));
 
-        saveHaarSpectrum1d(haar1d(sig2, false), sig2, outDir + "/signal2_haar.png",
-            "Спектр Хаара — Сигнал 2 (5 синусоид + шум)");
+        double[] haarCoeffs2 = haar1d(sig2, false);
+        saveHaarSpectrum1d(haarCoeffs2, sig2, outDir + "/signal2_haar.png",
+            "Вейвлет-коэффициенты Хаара — Сигнал 2");
+        saveHaarAmplitudeSpectrum1d(haarCoeffs2, sig2, outDir + "/signal2_haar_spectrum.png",
+            "Энергетический спектр Хаара — Сигнал 2 (5 синусоид + шум)");
 
         log.println("\nВсё сохранено в " + outDir + "/");
         log.close();

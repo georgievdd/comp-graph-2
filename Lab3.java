@@ -196,6 +196,34 @@ public class Lab3 {
         return dst;
     }
 
+    // ── Масштабирование (для оценки качества интерполяции) ───────────────────────
+
+    /** Уменьшение в 2 раза усреднением 2×2 блоков. */
+    static double[][] downsample2x(double[][] src) {
+        int h = src.length, w = src[0].length;
+        int nh = h/2, nw = w/2;
+        double[][] out = new double[nh][nw];
+        for (int y = 0; y < nh; y++)
+            for (int x = 0; x < nw; x++)
+                out[y][x] = (src[2*y][2*x] + src[2*y][2*x+1] +
+                             src[2*y+1][2*x] + src[2*y+1][2*x+1]) / 4.0;
+        return out;
+    }
+
+    /** Увеличение в 2 раза методом m (обратное проецирование). */
+    static double[][] upsample2x(double[][] src, Method m) {
+        int h = src.length, w = src[0].length;
+        int nh = h*2, nw = w*2;
+        double[][] out = new double[nh][nw];
+        for (int y = 0; y < nh; y++)
+            for (int x = 0; x < nw; x++) {
+                double sx = (x + 0.5) / 2.0 - 0.5;
+                double sy = (y + 0.5) / 2.0 - 0.5;
+                out[y][x] = interp(src, sx, sy, m);
+            }
+        return out;
+    }
+
     // ── Скос (дополнительное задание 1) ──────────────────────────────────────────
 
     /** Горизонтальный скос: x' = x + shear*y. */
@@ -351,8 +379,8 @@ public class Lab3 {
 
         double[] angles = {30, 45, 90, 135};
 
-        // ── Поворот: сравнение методов ────────────────────────────────────────────
-        log.println("  Поворот:");
+        // ── Поворот: сравнение методов ───────────────────────────────────────────
+        log.println("  Поворот (время):");
         for (double angle : angles) {
             long t0, t1;
 
@@ -368,16 +396,9 @@ public class Lab3 {
             double[][] rotBC = rotate(src, angle, Method.BICUBIC, true);
             t1 = System.nanoTime(); long msBC = (t1-t0)/1_000_000;
 
-            // PSNR туда-обратно: rotate(+angle) → rotate(-angle) → сравниваем с оригиналом.
-            // Это показывает, насколько метод сохраняет изображение при геометрическом преобразовании.
-            // Используем expand=false чтобы размеры совпадали с src.
-            double pNN = psnr(src, rotate(rotate(src, angle, Method.NN,       false), -angle, Method.NN,       false));
-            double pBL = psnr(src, rotate(rotate(src, angle, Method.BILINEAR, false), -angle, Method.BILINEAR, false));
-            double pBC = psnr(src, rotate(rotate(src, angle, Method.BICUBIC,  false), -angle, Method.BICUBIC,  false));
-
             log.println(String.format(
-                "    %5.0f°  NN: %4dms PSNR(туда-обр)=%5.1fdB | BL: %4dms PSNR=%5.1fdB | BC: %4dms PSNR=%5.1fdB",
-                angle, msNN, pNN, msBL, pBL, msBC, pBC));
+                "    %5.0f°  NN: %4dms | BL: %4dms | BC: %4dms",
+                angle, msNN, msBL, msBC));
 
             // Сохранить сравнение
             String angleStr = String.format("%03.0f", angle);
@@ -460,27 +481,7 @@ public class Lab3 {
         log.println("Лабораторная работа №3: Геометрические преобразования и интерполяция");
         log.println("Дата: " + new java.util.Date());
         log.println();
-        log.println("=== ЧТО ПОКАЗЫВАЕТ PSNR В ДАННОЙ РАБОТЕ ===");
-        log.println();
-        log.println("PSNR (Peak Signal-to-Noise Ratio) — метрика качества восстановления изображения.");
-        log.println("Формула: PSNR = 10 · log10(255² / MSE), где MSE — среднеквадратическая погрешность.");
-        log.println("Чем выше PSNR (дБ), тем ближе результат к эталону. Ниже 25 дБ — заметные артефакты.");
-        log.println();
-        log.println("Методика измерения в данной работе:");
-        log.println("  1. Берём оригинальное изображение.");
-        log.println("  2. Поворачиваем на угол +θ методом интерполяции M.");
-        log.println("  3. Поворачиваем результат обратно на −θ тем же методом M.");
-        log.println("  4. Вычисляем PSNR между восстановленным изображением и оригиналом.");
-        log.println();
-        log.println("Что это показывает:");
-        log.println("  Двойной поворот (туда-обратно) в идеале должен давать исходное изображение.");
-        log.println("  Реально каждая интерполяция вносит погрешность (размытие, артефакты ступенек).");
-        log.println("  PSNR измеряет эту суммарную погрешность и позволяет сравнить методы:");
-        log.println("    Ближайший сосед (NN)  — быстрый, но ступенчатые артефакты → низкий PSNR");
-        log.println("    Билинейная (BL)        — гладкий результат, некоторое размытие → средний PSNR");
-        log.println("    Бикубическая (BC)      — лучшее сохранение деталей → высокий PSNR");
-        log.println("=================================================");
-        log.println();
+
 
         String[] paths = {
             "examples/baboon.png",
@@ -501,6 +502,7 @@ public class Lab3 {
             processImage(img, src, names[i], outDir, log);
         }
 
+        log.println();
         log.println("Все результаты сохранены в " + outDir + "/");
         log.close();
         System.out.println("Все результаты → " + outDir + "/");

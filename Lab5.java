@@ -3,32 +3,65 @@ import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.*;
 import java.util.*;
-import java.util.List;
 
 /**
- * Лабораторная работа №5: Цветовые пространства и обработка цветных изображений.
+ * Лабораторная работа №5: Ранговая фильтрация и морфологические операции.
  *
  * Основное задание:
- *   1. Конвертация RGB↔HSV, RGB↔YCbCr(BT.601), RGB↔CIELab(D65) + RMSE верификация
- *   2. Визуализация каналов (отдельно H,S,V / Y,Cb,Cr / L,a,b)
- *   3. Сравнение эквализации гистограммы: RGB, HSV(V), YCbCr(Y)
+ *   1. Ранговая фильтрация для произвольной апертуры (квадрат, диск, крест)
+ *   2. Фильтр усечённого среднего (trimmed mean)
+ *   3. PSNR сравнение: ранговый, усечённое среднее, усредняющий (box), медианный
+ *      — аддитивный гауссов шум (σ²=400)
+ *      — импульсный шум (10% соль/перец)
+ *   4. Полутоновые морфологические операции: эрозия, наращение, открытие, закрытие
  *
  * Дополнительные задания:
- *   4. Коррекция баланса белого (метод серого мира)
- *   5. Цветовая квантизация (k-means, k=4,8,16)
- *   6. Сдвиг тона (в HSV) на +60°, +120°, +180°
- *   7. Хромакей (удаление зелёного фона)
+ *   5. Взвешенная медиана
+ *   6. Верх шляпы (tophat) и низ шляпы (bothat)
+ *   7. Морфологический градиент (дилатация − эрозия) vs. линейный лапласиан
  */
 public class Lab5 {
 
     // ── Вспомогательные функции ──────────────────────────────────────────────────
 
-    static int clamp(int v) {
-        return Math.max(0, Math.min(255, v));
+    static int[][] getBrightness(BufferedImage img) {
+        int w = img.getWidth(), h = img.getHeight();
+        int[][] b = new int[h][w];
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++) {
+                int rgb = img.getRGB(x, y);
+                b[y][x] = (int)(0.299*((rgb>>16)&0xFF) + 0.587*((rgb>>8)&0xFF) + 0.114*(rgb&0xFF));
+            }
+        return b;
     }
 
-    static int clampRound(double v) {
-        return clamp((int) Math.round(v));
+    static double[][] toDouble(int[][] a) {
+        int h = a.length, w = a[0].length;
+        double[][] d = new double[h][w];
+        for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) d[y][x] = a[y][x];
+        return d;
+    }
+
+    static BufferedImage toImage(double[][] p) {
+        int h = p.length, w = p[0].length;
+        BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++) {
+                int v = Math.max(0, Math.min(255, (int)Math.round(p[y][x])));
+                img.setRGB(x, y, v * 0x10101);
+            }
+        return img;
+    }
+
+    static BufferedImage normalizeToImage(double[][] data) {
+        int h = data.length, w = data[0].length;
+        double min = Double.MAX_VALUE, max = -Double.MAX_VALUE;
+        for (double[] r : data) for (double v : r) { if (v < min) min = v; if (v > max) max = v; }
+        double[][] norm = new double[h][w];
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+                norm[y][x] = max > min ? 255.0*(data[y][x]-min)/(max-min) : 128;
+        return toImage(norm);
     }
 
     static void save(BufferedImage img, String path) throws IOException {
@@ -36,788 +69,499 @@ public class Lab5 {
         ImageIO.write(img, "png", new File(path));
     }
 
-    /** Читает изображение и конвертирует в TYPE_INT_RGB. */
-    static BufferedImage loadRGB(String path) throws IOException {
-        BufferedImage src = ImageIO.read(new File(path));
-        if (src == null) throw new IOException("Cannot read: " + path);
-        if (src.getType() == BufferedImage.TYPE_INT_RGB) return src;
-        BufferedImage out = new BufferedImage(src.getWidth(), src.getHeight(), BufferedImage.TYPE_INT_RGB);
-        Graphics2D g = out.createGraphics();
-        g.drawImage(src, 0, 0, null);
-        g.dispose();
+    static double psnr(double[][] orig, double[][] filt) {
+        int h = orig.length, w = orig[0].length;
+        double mse = 0;
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++) { double d = orig[y][x] - filt[y][x]; mse += d*d; }
+        mse /= h*w;
+        return mse < 1e-10 ? 99.99 : 10*Math.log10(255.0*255.0/mse);
+    }
+
+    // ── Генерация шума ────────────────────────────────────────────────────────────
+
+    static double[][] addGaussianNoise(double[][] src, double variance, Random rng) {
+        int h = src.length, w = src[0].length;
+        double sigma = Math.sqrt(variance);
+        double[][] out = new double[h][w];
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+                out[y][x] = Math.max(0, Math.min(255, src[y][x] + sigma * rng.nextGaussian()));
         return out;
     }
 
+    static double[][] addImpulseNoise(double[][] src, double prob, Random rng) {
+        int h = src.length, w = src[0].length;
+        double[][] out = new double[h][w];
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++) {
+                double r = rng.nextDouble();
+                if      (r < prob/2) out[y][x] = 0;
+                else if (r < prob)   out[y][x] = 255;
+                else                 out[y][x] = src[y][x];
+            }
+        return out;
+    }
+
+    // ── Апертуры ─────────────────────────────────────────────────────────────────
+
+    /** Квадратная апертура N×N (все пиксели включены). */
+    static boolean[][] squareAperture(int size) {
+        boolean[][] ap = new boolean[size][size];
+        for (boolean[] row : ap) Arrays.fill(row, true);
+        return ap;
+    }
+
+    /** Дисковая (круглая) апертура радиуса r. Размер (2r+1)×(2r+1). */
+    static boolean[][] diskAperture(int radius) {
+        int size = 2*radius + 1;
+        boolean[][] ap = new boolean[size][size];
+        for (int y = 0; y < size; y++)
+            for (int x = 0; x < size; x++) {
+                int dy = y-radius, dx = x-radius;
+                ap[y][x] = (dy*dy + dx*dx <= radius*radius);
+            }
+        return ap;
+    }
+
+    /** Крестообразная апертура. */
+    static boolean[][] crossAperture(int radius) {
+        int size = 2*radius + 1;
+        boolean[][] ap = new boolean[size][size];
+        for (int i = 0; i < size; i++) {
+            ap[radius][i] = true;
+            ap[i][radius] = true;
+        }
+        return ap;
+    }
+
+    static int apertureName(boolean[][] ap) {
+        int cnt = 0;
+        for (boolean[] r : ap) for (boolean v : r) if (v) cnt++;
+        return cnt;
+    }
+
+    // ── Сбор значений в апертуре ─────────────────────────────────────────────────
+
+    static double[] collectNeighbors(double[][] src, int cy, int cx, boolean[][] aperture) {
+        int h = src.length, w = src[0].length;
+        int ar = aperture.length/2, ac = aperture[0].length/2;
+        int cnt = 0;
+        for (boolean[] row : aperture) for (boolean v : row) if (v) cnt++;
+        double[] vals = new double[cnt];
+        int idx = 0;
+        for (int dy = -ar; dy <= ar; dy++)
+            for (int dx = -ac; dx <= ac; dx++)
+                if (aperture[dy+ar][dx+ac]) {
+                    int sy = Math.max(0, Math.min(h-1, cy+dy));
+                    int sx = Math.max(0, Math.min(w-1, cx+dx));
+                    vals[idx++] = src[sy][sx];
+                }
+        return vals;
+    }
+
+    // ── Ранговая фильтрация ───────────────────────────────────────────────────────
+
     /**
-     * Строит горизонтальную полосу сравнения из нескольких изображений.
-     * Все изображения масштабируются до одной высоты (первого изображения).
+     * Ранговый фильтр для произвольной апертуры.
+     * rankFraction ∈ [0.0, 1.0]: 0.0 = минимум, 0.5 = медиана, 1.0 = максимум.
      */
+    static double[][] applyRankFilter(double[][] src, boolean[][] aperture, double rankFraction) {
+        int h = src.length, w = src[0].length;
+        double[][] out = new double[h][w];
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                double[] vals = collectNeighbors(src, y, x, aperture);
+                Arrays.sort(vals);
+                int idx = Math.min((int)(rankFraction * vals.length), vals.length - 1);
+                out[y][x] = vals[idx];
+            }
+        }
+        return out;
+    }
+
+    static double[][] medianFilter(double[][] src, boolean[][] ap)  { return applyRankFilter(src, ap, 0.5); }
+    static double[][] minFilter(double[][] src, boolean[][] ap)     { return applyRankFilter(src, ap, 0.0); }
+    static double[][] maxFilter(double[][] src, boolean[][] ap)     { return applyRankFilter(src, ap, 1.0); }
+
+    // ── Фильтр усечённого среднего ────────────────────────────────────────────────
+
+    /**
+     * Фильтр усечённого среднего (trimmed mean).
+     * alpha ∈ [0, 0.5): доля значений, отбрасываемых с каждого конца отсортированного ряда.
+     * alpha=0 ↔ обычное среднее;  alpha→0.5 ↔ медиана.
+     */
+    static double[][] applyTrimmedMeanFilter(double[][] src, boolean[][] aperture, double alpha) {
+        int h = src.length, w = src[0].length;
+        double[][] out = new double[h][w];
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                double[] vals = collectNeighbors(src, y, x, aperture);
+                Arrays.sort(vals);
+                int n = vals.length;
+                int skip = Math.max(0, Math.min((int)(alpha * n), n/2 - 1));
+                double sum = 0; int cnt = 0;
+                for (int i = skip; i < n - skip; i++) { sum += vals[i]; cnt++; }
+                out[y][x] = cnt > 0 ? sum/cnt : vals[n/2];
+            }
+        }
+        return out;
+    }
+
+    /** Усредняющий (box) фильтр для произвольной апертуры (trimmed mean с alpha=0). */
+    static double[][] boxFilter(double[][] src, boolean[][] aperture) {
+        return applyTrimmedMeanFilter(src, aperture, 0.0);
+    }
+
+    // ── Взвешенная медиана (доп. задание 5) ─────────────────────────────────────
+
+    /**
+     * Взвешенная медиана: каждый пиксель окрестности получает вес,
+     * обратно пропорциональный расстоянию до центра (1/(1+dist)).
+     * Для нахождения медианы: взвешенная медиана — точка, где CDF весов переходит через 0.5.
+     */
+    static double[][] weightedMedianFilter(double[][] src, boolean[][] aperture) {
+        int h = src.length, w = src[0].length;
+        int ar = aperture.length/2, ac = aperture[0].length/2;
+        double[][] out = new double[h][w];
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                // Collect (value, weight) pairs
+                double[] vals = collectNeighbors(src, y, x, aperture);
+                double[] weights = new double[vals.length];
+                int idx = 0;
+                for (int dy = -ar; dy <= ar; dy++)
+                    for (int dx = -ac; dx <= ac; dx++)
+                        if (aperture[dy+ar][dx+ac]) {
+                            double dist = Math.sqrt(dy*dy + dx*dx);
+                            weights[idx++] = 1.0 / (1.0 + dist);
+                        }
+                // Sort by value
+                Integer[] order = new Integer[vals.length];
+                for (int i = 0; i < order.length; i++) order[i] = i;
+                Arrays.sort(order, (a, b) -> Double.compare(vals[a], vals[b]));
+                double totalW = 0;
+                for (double ww : weights) totalW += ww;
+                double cumW = 0, med = vals[order[order.length/2]];
+                for (int i : order) {
+                    cumW += weights[i];
+                    if (cumW >= totalW/2.0) { med = vals[i]; break; }
+                }
+                out[y][x] = med;
+            }
+        }
+        return out;
+    }
+
+    // ── Морфологические операции ─────────────────────────────────────────────────
+
+    /** Эрозия — минимальное значение в окне структурирующего элемента. */
+    static double[][] erosion(double[][] src, boolean[][] se) {
+        return minFilter(src, se);
+    }
+
+    /** Наращение (дилатация) — максимальное значение в окне структурирующего элемента. */
+    static double[][] dilation(double[][] src, boolean[][] se) {
+        return maxFilter(src, se);
+    }
+
+    /** Открытие: эрозия, затем наращение тем же SE. Удаляет мелкие светлые объекты. */
+    static double[][] opening(double[][] src, boolean[][] se) {
+        return dilation(erosion(src, se), se);
+    }
+
+    /** Закрытие: наращение, затем эрозия тем же SE. Заполняет мелкие тёмные пробелы. */
+    static double[][] closing(double[][] src, boolean[][] se) {
+        return erosion(dilation(src, se), se);
+    }
+
+    /** Верх шляпы (tophat) = src − opening. Выделяет мелкие светлые структуры. */
+    static double[][] tophat(double[][] src, boolean[][] se) {
+        double[][] open = opening(src, se);
+        int h = src.length, w = src[0].length;
+        double[][] out = new double[h][w];
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+                out[y][x] = Math.max(0, src[y][x] - open[y][x]);
+        return out;
+    }
+
+    /** Низ шляпы (bothat) = closing − src. Выделяет мелкие тёмные структуры. */
+    static double[][] bothat(double[][] src, boolean[][] se) {
+        double[][] close = closing(src, se);
+        int h = src.length, w = src[0].length;
+        double[][] out = new double[h][w];
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+                out[y][x] = Math.max(0, close[y][x] - src[y][x]);
+        return out;
+    }
+
+    /** Морфологический градиент = dilation − erosion. Выделяет границы. */
+    static double[][] morphGradient(double[][] src, boolean[][] se) {
+        double[][] dil = dilation(src, se);
+        double[][] er  = erosion(src, se);
+        int h = src.length, w = src[0].length;
+        double[][] out = new double[h][w];
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+                out[y][x] = dil[y][x] - er[y][x];
+        return out;
+    }
+
+    // ── Визуализация ─────────────────────────────────────────────────────────────
+
     static BufferedImage makeRow(String title, String[] labels, BufferedImage[] imgs) {
-        int H = imgs[0].getHeight();
-        int W = imgs[0].getWidth();
-        int labelH = 20;
-        int titleH = 24;
-        int n = imgs.length;
-        int totalW = W * n;
-        int totalH = H + labelH + titleH;
-
-        BufferedImage row = new BufferedImage(totalW, totalH, BufferedImage.TYPE_INT_RGB);
-        Graphics2D g = row.createGraphics();
-        g.setColor(Color.WHITE);
-        g.fillRect(0, 0, totalW, totalH);
-
-        // Заголовок
+        int pad = 6, topH = 28, labH = 16;
+        int maxH = 0;
+        for (BufferedImage img : imgs) if (img.getHeight() > maxH) maxH = img.getHeight();
+        int totalW = pad;
+        for (BufferedImage img : imgs) totalW += img.getWidth() + pad;
+        BufferedImage out = new BufferedImage(totalW, topH+labH+maxH+pad, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = out.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setColor(Color.WHITE); g.fillRect(0, 0, out.getWidth(), out.getHeight());
         g.setColor(Color.BLACK);
-        g.setFont(new Font("SansSerif", Font.BOLD, 14));
-        FontMetrics fm = g.getFontMetrics();
-        int tw = fm.stringWidth(title);
-        g.drawString(title, (totalW - tw) / 2, titleH - 5);
-
-        // Изображения и подписи
-        g.setFont(new Font("SansSerif", Font.PLAIN, 11));
-        fm = g.getFontMetrics();
-        for (int i = 0; i < n; i++) {
-            // Масштабируем если нужно
-            BufferedImage img = imgs[i];
-            if (img.getWidth() != W || img.getHeight() != H) {
-                BufferedImage scaled = new BufferedImage(W, H, BufferedImage.TYPE_INT_RGB);
-                Graphics2D gs = scaled.createGraphics();
-                gs.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-                gs.drawImage(img, 0, 0, W, H, null);
-                gs.dispose();
-                img = scaled;
-            }
-            g.drawImage(img, i * W, titleH, null);
-            // Подпись под изображением
-            if (labels != null && i < labels.length) {
-                String lbl = labels[i];
-                int lw = fm.stringWidth(lbl);
-                g.setColor(Color.BLACK);
-                g.drawString(lbl, i * W + (W - lw) / 2, titleH + H + labelH - 4);
-            }
+        g.setFont(new Font("SansSerif", Font.BOLD, 11));
+        g.drawString(title, pad, 18);
+        g.setFont(new Font("SansSerif", Font.PLAIN, 9));
+        int px = pad;
+        for (int i = 0; i < imgs.length; i++) {
+            g.drawString(labels[i], px, topH+labH-3);
+            g.drawImage(imgs[i], px, topH+labH, null);
+            px += imgs[i].getWidth() + pad;
         }
         g.dispose();
-        return row;
-    }
-
-    // ── Серое изображение из массива double[] (нормализация в [0,255]) ───────────
-
-    static BufferedImage grayFromDoubleNorm(double[] data, int w, int h, double lo, double hi) {
-        BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
-        double range = (hi - lo) < 1e-12 ? 1.0 : (hi - lo);
-        for (int y = 0; y < h; y++)
-            for (int x = 0; x < w; x++) {
-                int v = clamp((int) Math.round((data[y * w + x] - lo) / range * 255.0));
-                img.setRGB(x, y, (v << 16) | (v << 8) | v);
-            }
-        return img;
-    }
-
-    // ── RGB ↔ HSV ────────────────────────────────────────────────────────────────
-
-    /** Возвращает {H [0,360), S [0,1], V [0,1]} */
-    static double[] rgbToHSV(int r, int g, int b) {
-        double rv = r / 255.0, gv = g / 255.0, bv = b / 255.0;
-        double M = Math.max(rv, Math.max(gv, bv));
-        double m = Math.min(rv, Math.min(gv, bv));
-        double C = M - m;
-        double V = M;
-        double S = (M > 0) ? C / M : 0.0;
-        double H;
-        if (C < 1e-10) {
-            H = 0;
-        } else if (M == rv) {
-            H = 60.0 * (((gv - bv) / C) % 6.0);
-        } else if (M == gv) {
-            H = 60.0 * ((bv - rv) / C + 2.0);
-        } else {
-            H = 60.0 * ((rv - gv) / C + 4.0);
-        }
-        if (H < 0) H += 360.0;
-        return new double[]{H, S, V};
-    }
-
-    static int[] hsvToRGB(double H, double S, double V) {
-        double Cv = V * S;
-        double Hmod = H / 60.0;
-        double X = Cv * (1.0 - Math.abs(Hmod % 2.0 - 1.0));
-        double m = V - Cv;
-        double rp, gp, bp;
-        int sec = (int) Hmod % 6;
-        // Handle H==360 edge
-        if (H >= 360.0) sec = 0;
-        switch (sec) {
-            case 0: rp = Cv; gp = X;  bp = 0;  break;
-            case 1: rp = X;  gp = Cv; bp = 0;  break;
-            case 2: rp = 0;  gp = Cv; bp = X;  break;
-            case 3: rp = 0;  gp = X;  bp = Cv; break;
-            case 4: rp = X;  gp = 0;  bp = Cv; break;
-            default:rp = Cv; gp = 0;  bp = X;  break;
-        }
-        return new int[]{
-            clampRound((rp + m) * 255.0),
-            clampRound((gp + m) * 255.0),
-            clampRound((bp + m) * 255.0)
-        };
-    }
-
-    // ── RGB ↔ YCbCr (BT.601) ────────────────────────────────────────────────────
-
-    /** Returns {Y, Cb, Cr} as doubles (Y in [0,255], Cb/Cr in [0,255] with 128 offset) */
-    static double[] rgbToYCbCr(int r, int g, int b) {
-        double Y  =  0.299    * r + 0.587    * g + 0.114    * b;
-        double Cb = -0.168736 * r - 0.331264 * g + 0.500    * b + 128.0;
-        double Cr =  0.500    * r - 0.418688 * g - 0.081312 * b + 128.0;
-        return new double[]{Y, Cb, Cr};
-    }
-
-    static int[] ycbcrToRGB(double Y, double Cb, double Cr) {
-        double R = Y + 1.402    * (Cr - 128.0);
-        double G = Y - 0.344136 * (Cb - 128.0) - 0.714136 * (Cr - 128.0);
-        double B = Y + 1.772    * (Cb - 128.0);
-        return new int[]{clampRound(R), clampRound(G), clampRound(B)};
-    }
-
-    // ── RGB ↔ CIELab (D65) ──────────────────────────────────────────────────────
-
-    static final double Xn = 0.95047, Yn = 1.0, Zn = 1.08883;
-
-    static double srgbLinearize(double v) {
-        return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
-    }
-
-    static double srgbGamma(double v) {
-        if (v <= 0.0) return 0.0;
-        return v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(v, 1.0 / 2.4) - 0.055;
-    }
-
-    static double labF(double t) {
-        return t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16.0 / 116.0;
-    }
-
-    static double labInvF(double t) {
-        return t > 0.20689655 ? t * t * t : (t - 16.0 / 116.0) / 7.787;
-    }
-
-    /** Returns {L, a, b} */
-    static double[] rgbToLab(int r, int g, int b) {
-        double rl = srgbLinearize(r / 255.0);
-        double gl = srgbLinearize(g / 255.0);
-        double bl = srgbLinearize(b / 255.0);
-        double X = 0.4124564 * rl + 0.3575761 * gl + 0.1804375 * bl;
-        double Y = 0.2126729 * rl + 0.7151522 * gl + 0.0721750 * bl;
-        double Z = 0.0193339 * rl + 0.1191920 * gl + 0.9503041 * bl;
-        double fx = labF(X / Xn), fy = labF(Y / Yn), fz = labF(Z / Zn);
-        double L = 116.0 * fy - 16.0;
-        double a = 500.0 * (fx - fy);
-        double bv = 200.0 * (fy - fz);
-        return new double[]{L, a, bv};
-    }
-
-    static int[] labToRGB(double L, double a, double bv) {
-        double fy = (L + 16.0) / 116.0;
-        double fx = a / 500.0 + fy;
-        double fz = fy - bv / 200.0;
-        double X = labInvF(fx) * Xn;
-        double Y = labInvF(fy) * Yn;
-        double Z = labInvF(fz) * Zn;
-        double rl =  3.2404542 * X - 1.5371385 * Y - 0.4985314 * Z;
-        double gl = -0.9692660 * X + 1.8760108 * Y + 0.0415560 * Z;
-        double bl =  0.0556434 * X - 0.2040259 * Y + 1.0572252 * Z;
-        // Clamp linear before gamma to handle slight out-of-gamut
-        rl = Math.max(0.0, rl);
-        gl = Math.max(0.0, gl);
-        bl = Math.max(0.0, bl);
-        return new int[]{
-            clampRound(srgbGamma(rl) * 255.0),
-            clampRound(srgbGamma(gl) * 255.0),
-            clampRound(srgbGamma(bl) * 255.0)
-        };
-    }
-
-    // ── RMSE ────────────────────────────────────────────────────────────────────
-
-    static double rmse(BufferedImage a, BufferedImage b) {
-        int w = a.getWidth(), h = a.getHeight();
-        double sum = 0;
-        for (int y = 0; y < h; y++)
-            for (int x = 0; x < w; x++) {
-                int ca = a.getRGB(x, y), cb = b.getRGB(x, y);
-                int dr = ((ca >> 16) & 0xFF) - ((cb >> 16) & 0xFF);
-                int dg = ((ca >> 8)  & 0xFF) - ((cb >> 8)  & 0xFF);
-                int db = (ca & 0xFF) - (cb & 0xFF);
-                sum += dr * dr + dg * dg + db * db;
-            }
-        return Math.sqrt(sum / (3.0 * w * h));
-    }
-
-    // ── Канальные визуализации ───────────────────────────────────────────────────
-
-    /** Создаёт серое изображение из одного канала RGB (0=R,1=G,2=B). */
-    static BufferedImage extractRGBChannel(BufferedImage img, int ch) {
-        int w = img.getWidth(), h = img.getHeight();
-        BufferedImage out = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
-        for (int y = 0; y < h; y++)
-            for (int x = 0; x < w; x++) {
-                int rgb = img.getRGB(x, y);
-                int v = (ch == 0) ? (rgb >> 16) & 0xFF : (ch == 1) ? (rgb >> 8) & 0xFF : rgb & 0xFF;
-                out.setRGB(x, y, (v << 16) | (v << 8) | v);
-            }
         return out;
     }
 
-    static BufferedImage[] hsvChannelImages(BufferedImage img) {
-        int w = img.getWidth(), h = img.getHeight();
-        double[] H = new double[w * h], S = new double[w * h], V = new double[w * h];
-        for (int y = 0; y < h; y++)
-            for (int x = 0; x < w; x++) {
-                int rgb = img.getRGB(x, y);
-                double[] hsv = rgbToHSV((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
-                H[y * w + x] = hsv[0];
-                S[y * w + x] = hsv[1];
-                V[y * w + x] = hsv[2];
-            }
-        return new BufferedImage[]{
-            grayFromDoubleNorm(H, w, h, 0, 360),
-            grayFromDoubleNorm(S, w, h, 0, 1),
-            grayFromDoubleNorm(V, w, h, 0, 1)
-        };
-    }
+    // ── Обработка одного изображения ─────────────────────────────────────────────
 
-    static BufferedImage[] ycbcrChannelImages(BufferedImage img) {
-        int w = img.getWidth(), h = img.getHeight();
-        double[] Y = new double[w * h], Cb = new double[w * h], Cr = new double[w * h];
-        for (int y = 0; y < h; y++)
-            for (int x = 0; x < w; x++) {
-                int rgb = img.getRGB(x, y);
-                double[] ycbcr = rgbToYCbCr((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
-                Y[y * w + x]  = ycbcr[0];
-                Cb[y * w + x] = ycbcr[1];
-                Cr[y * w + x] = ycbcr[2];
-            }
-        return new BufferedImage[]{
-            grayFromDoubleNorm(Y,  w, h, 0, 255),
-            grayFromDoubleNorm(Cb, w, h, 0, 255),
-            grayFromDoubleNorm(Cr, w, h, 0, 255)
-        };
-    }
+    static void processImage(BufferedImage origImg, double[][] src, String name,
+                             String outDir, PrintWriter log) throws IOException {
+        int h = src.length, w = src[0].length;
+        log.println("=== " + name + " (" + w + "×" + h + ") ===");
 
-    static BufferedImage[] labChannelImages(BufferedImage img) {
-        int w = img.getWidth(), h = img.getHeight();
-        double[] L = new double[w * h], A = new double[w * h], B = new double[w * h];
-        double Lmin = Double.MAX_VALUE, Lmax = -Double.MAX_VALUE;
-        double Amin = Double.MAX_VALUE, Amax = -Double.MAX_VALUE;
-        double Bmin = Double.MAX_VALUE, Bmax = -Double.MAX_VALUE;
-        for (int y = 0; y < h; y++)
-            for (int x = 0; x < w; x++) {
-                int rgb = img.getRGB(x, y);
-                double[] lab = rgbToLab((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
-                L[y * w + x] = lab[0]; A[y * w + x] = lab[1]; B[y * w + x] = lab[2];
-                if (lab[0] < Lmin) Lmin = lab[0]; if (lab[0] > Lmax) Lmax = lab[0];
-                if (lab[1] < Amin) Amin = lab[1]; if (lab[1] > Amax) Amax = lab[1];
-                if (lab[2] < Bmin) Bmin = lab[2]; if (lab[2] > Bmax) Bmax = lab[2];
-            }
-        return new BufferedImage[]{
-            grayFromDoubleNorm(L, w, h, Lmin, Lmax),
-            grayFromDoubleNorm(A, w, h, Amin, Amax),
-            grayFromDoubleNorm(B, w, h, Bmin, Bmax)
-        };
-    }
+        Random rng = new Random(42);
+        double[][] noiseG = addGaussianNoise(src, 400, rng);   // σ²=400, σ≈20
+        double[][] noiseI = addImpulseNoise(src,  0.10, rng);  // 10% соль/перец
 
-    // ── Эквализация гистограммы ──────────────────────────────────────────────────
+        // Апертуры
+        boolean[][] sq5   = squareAperture(5);    // 5×5 квадрат (25 px)
+        boolean[][] sq3   = squareAperture(3);    // 3×3 квадрат (9 px)
+        boolean[][] disk2 = diskAperture(2);      // диск r=2 (~21 px)
+        boolean[][] disk1 = diskAperture(1);      // диск r=1 (5 px, крест с углами)
+        boolean[][] cross3= crossAperture(2);     // крест r=2
 
-    /** Эквализация одного канала (значения 0..255). */
-    static int[] equalizeChannel(int[] vals) {
-        int N = vals.length;
-        int[] hist = new int[256];
-        for (int v : vals) hist[v]++;
-        int[] cdf = new int[256];
-        cdf[0] = hist[0];
-        for (int i = 1; i < 256; i++) cdf[i] = cdf[i - 1] + hist[i];
-        int cdfMin = 0;
-        for (int i = 0; i < 256; i++) { if (cdf[i] > 0) { cdfMin = cdf[i]; break; } }
-        int[] lut = new int[256];
-        for (int i = 0; i < 256; i++) {
-            lut[i] = (N == cdfMin) ? 0 : clamp((int) Math.round((double)(cdf[i] - cdfMin) / (N - cdfMin) * 255.0));
-        }
-        int[] out = new int[N];
-        for (int i = 0; i < N; i++) out[i] = lut[vals[i]];
-        return out;
-    }
+        // ──────────────────── ГАУССОВ ШУМ ────────────────────────────────────────
+        double pNoiseG = psnr(src, noiseG);
+        double[][] boxG5    = boxFilter(noiseG, sq5);
+        double[][] medSq5G  = medianFilter(noiseG, sq5);
+        double[][] medDisk2G= medianFilter(noiseG, disk2);
+        double[][] medCross3G=medianFilter(noiseG, cross3);
+        double[][] tm10G    = applyTrimmedMeanFilter(noiseG, sq5, 0.10);
+        double[][] tm25G    = applyTrimmedMeanFilter(noiseG, sq5, 0.25);
+        double[][] wmedG    = weightedMedianFilter(noiseG, sq5);
 
-    /** Эквализация RGB — каждый канал независимо. */
-    static BufferedImage histEqRGB(BufferedImage img) {
-        int w = img.getWidth(), h = img.getHeight();
-        int N = w * h;
-        int[] R = new int[N], G = new int[N], B = new int[N];
-        for (int y = 0; y < h; y++)
-            for (int x = 0; x < w; x++) {
-                int rgb = img.getRGB(x, y);
-                R[y * w + x] = (rgb >> 16) & 0xFF;
-                G[y * w + x] = (rgb >> 8)  & 0xFF;
-                B[y * w + x] = rgb & 0xFF;
-            }
-        R = equalizeChannel(R); G = equalizeChannel(G); B = equalizeChannel(B);
-        BufferedImage out = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
-        for (int y = 0; y < h; y++)
-            for (int x = 0; x < w; x++)
-                out.setRGB(x, y, (R[y*w+x] << 16) | (G[y*w+x] << 8) | B[y*w+x]);
-        return out;
-    }
+        log.println("  Гауссов шум σ²=400 (PSNR шума: " + String.format("%.2f", pNoiseG) + " дБ) → PSNR фильтрации:");
+        log.println(String.format("    Усредняющий 5×5 (box):          %5.2f дБ", psnr(src, boxG5)));
+        log.println(String.format("    Медиана 5×5 (квадрат):          %5.2f дБ", psnr(src, medSq5G)));
+        log.println(String.format("    Медиана (диск r=2):             %5.2f дБ", psnr(src, medDisk2G)));
+        log.println(String.format("    Медиана (крест r=2):            %5.2f дБ", psnr(src, medCross3G)));
+        log.println(String.format("    Усечённое среднее α=10%%:        %5.2f дБ", psnr(src, tm10G)));
+        log.println(String.format("    Усечённое среднее α=25%%:        %5.2f дБ", psnr(src, tm25G)));
+        log.println(String.format("    Взвешенная медиана (5×5):       %5.2f дБ", psnr(src, wmedG)));
 
-    /** Эквализация только канала V в HSV. */
-    static BufferedImage histEqHSV_V(BufferedImage img) {
-        int w = img.getWidth(), h = img.getHeight();
-        int N = w * h;
-        double[][] hsvData = new double[N][3];
-        int[] Vints = new int[N];
-        for (int y = 0; y < h; y++)
-            for (int x = 0; x < w; x++) {
-                int rgb = img.getRGB(x, y);
-                double[] hsv = rgbToHSV((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
-                hsvData[y * w + x] = hsv;
-                Vints[y * w + x] = clamp((int) Math.round(hsv[2] * 255.0));
-            }
-        int[] Veq = equalizeChannel(Vints);
-        BufferedImage out = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
-        for (int y = 0; y < h; y++)
-            for (int x = 0; x < w; x++) {
-                double[] hsv = hsvData[y * w + x];
-                double Veqd = Veq[y * w + x] / 255.0;
-                int[] rgb = hsvToRGB(hsv[0], hsv[1], Veqd);
-                out.setRGB(x, y, (rgb[0] << 16) | (rgb[1] << 8) | rgb[2]);
-            }
-        return out;
-    }
+        // Ранговые фильтры на гауссовом шуме
+        double[][] rk10G = applyRankFilter(noiseG, sq5, 0.10);
+        double[][] rk25G = applyRankFilter(noiseG, sq5, 0.25);
+        double[][] rk50G = medianFilter(noiseG, sq5);
+        double[][] rk75G = applyRankFilter(noiseG, sq5, 0.75);
+        double[][] rk90G = applyRankFilter(noiseG, sq5, 0.90);
+        log.println("  Ранговые фильтры 5×5 (гауссов шум):");
+        log.println(String.format("    Rank=0.10: %5.2f дБ  Rank=0.25: %5.2f дБ  Rank=0.50: %5.2f дБ  Rank=0.75: %5.2f дБ  Rank=0.90: %5.2f дБ",
+            psnr(src, rk10G), psnr(src, rk25G), psnr(src, rk50G), psnr(src, rk75G), psnr(src, rk90G)));
 
-    /** Эквализация только канала Y в YCbCr. */
-    static BufferedImage histEqYCbCr_Y(BufferedImage img) {
-        int w = img.getWidth(), h = img.getHeight();
-        int N = w * h;
-        double[][] ycbcrData = new double[N][3];
-        int[] Yints = new int[N];
-        for (int y = 0; y < h; y++)
-            for (int x = 0; x < w; x++) {
-                int rgb = img.getRGB(x, y);
-                double[] ycbcr = rgbToYCbCr((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
-                ycbcrData[y * w + x] = ycbcr;
-                Yints[y * w + x] = clamp((int) Math.round(ycbcr[0]));
-            }
-        int[] Yeq = equalizeChannel(Yints);
-        BufferedImage out = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
-        for (int y = 0; y < h; y++)
-            for (int x = 0; x < w; x++) {
-                double[] ycbcr = ycbcrData[y * w + x];
-                int[] rgb = ycbcrToRGB((double) Yeq[y * w + x], ycbcr[1], ycbcr[2]);
-                out.setRGB(x, y, (rgb[0] << 16) | (rgb[1] << 8) | rgb[2]);
-            }
-        return out;
-    }
+        // Сохранить сравнение для гауссова шума
+        save(makeRow(name + " — Гауссов шум σ²=400: сравнение фильтров",
+            new String[]{"Оригинал", "Шум (σ²=400)", "Box 5×5", "Медиана 5×5",
+                         "Мед. диск r=2", "TrimMean α=10%", "TrimMean α=25%"},
+            new BufferedImage[]{origImg, toImage(noiseG), toImage(boxG5), toImage(medSq5G),
+                                toImage(medDisk2G), toImage(tm10G), toImage(tm25G)}),
+            outDir + "/" + name + "_gaussian.png");
 
-    // ── Баланс белого (метод серого мира) ────────────────────────────────────────
+        save(makeRow(name + " — Гауссов шум: ранговый фильтр 5×5 (разные квантили)",
+            new String[]{"Оригинал", "Rank=0.10", "Rank=0.25", "Медиана(0.50)", "Rank=0.75", "Rank=0.90"},
+            new BufferedImage[]{origImg, toImage(rk10G), toImage(rk25G), toImage(rk50G),
+                                toImage(rk75G), toImage(rk90G)}),
+            outDir + "/" + name + "_rank_gaussian.png");
 
-    static BufferedImage grayWorldWhiteBalance(BufferedImage img) {
-        int w = img.getWidth(), h = img.getHeight();
-        long sumR = 0, sumG = 0, sumB = 0;
-        for (int y = 0; y < h; y++)
-            for (int x = 0; x < w; x++) {
-                int rgb = img.getRGB(x, y);
-                sumR += (rgb >> 16) & 0xFF;
-                sumG += (rgb >> 8)  & 0xFF;
-                sumB += rgb & 0xFF;
-            }
-        int N = w * h;
-        double meanR = sumR / (double) N;
-        double meanG = sumG / (double) N;
-        double meanB = sumB / (double) N;
-        double meanAll = (meanR + meanG + meanB) / 3.0;
-        double kR = (meanR > 0) ? meanAll / meanR : 1.0;
-        double kG = (meanG > 0) ? meanAll / meanG : 1.0;
-        double kB = (meanB > 0) ? meanAll / meanB : 1.0;
-        BufferedImage out = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
-        for (int y = 0; y < h; y++)
-            for (int x = 0; x < w; x++) {
-                int rgb = img.getRGB(x, y);
-                int R = clampRound(((rgb >> 16) & 0xFF) * kR);
-                int G = clampRound(((rgb >> 8)  & 0xFF) * kG);
-                int B = clampRound((rgb & 0xFF)          * kB);
-                out.setRGB(x, y, (R << 16) | (G << 8) | B);
-            }
-        return out;
-    }
+        // ──────────────────── ИМПУЛЬСНЫЙ ШУМ ─────────────────────────────────────
+        double pNoiseI = psnr(src, noiseI);
+        double[][] boxI5    = boxFilter(noiseI, sq5);
+        double[][] medSq5I  = medianFilter(noiseI, sq5);
+        double[][] medDisk2I= medianFilter(noiseI, disk2);
+        double[][] medCross3I=medianFilter(noiseI, cross3);
+        double[][] tm10I    = applyTrimmedMeanFilter(noiseI, sq5, 0.10);
+        double[][] tm25I    = applyTrimmedMeanFilter(noiseI, sq5, 0.25);
+        double[][] wmedI    = weightedMedianFilter(noiseI, sq5);
 
-    // ── Цветовая квантизация (k-means) ───────────────────────────────────────────
+        log.println("  Импульсный шум 10%% (PSNR шума: " + String.format("%.2f", pNoiseI) + " дБ) → PSNR фильтрации:");
+        log.println(String.format("    Усредняющий 5×5 (box):          %5.2f дБ", psnr(src, boxI5)));
+        log.println(String.format("    Медиана 5×5 (квадрат):          %5.2f дБ", psnr(src, medSq5I)));
+        log.println(String.format("    Медиана (диск r=2):             %5.2f дБ", psnr(src, medDisk2I)));
+        log.println(String.format("    Медиана (крест r=2):            %5.2f дБ", psnr(src, medCross3I)));
+        log.println(String.format("    Усечённое среднее α=10%%:        %5.2f дБ", psnr(src, tm10I)));
+        log.println(String.format("    Усечённое среднее α=25%%:        %5.2f дБ", psnr(src, tm25I)));
+        log.println(String.format("    Взвешенная медиана (5×5):       %5.2f дБ", psnr(src, wmedI)));
 
-    static BufferedImage kmeansQuantize(BufferedImage img, int k, int maxIter, long seed) {
-        int w = img.getWidth(), h = img.getHeight();
-        int N = w * h;
-        int[] pixels = new int[N];
-        for (int y = 0; y < h; y++)
-            for (int x = 0; x < w; x++)
-                pixels[y * w + x] = img.getRGB(x, y);
+        double[][] rk10I = applyRankFilter(noiseI, sq5, 0.10);
+        double[][] rk25I = applyRankFilter(noiseI, sq5, 0.25);
+        double[][] rk50I = medianFilter(noiseI, sq5);
+        double[][] rk75I = applyRankFilter(noiseI, sq5, 0.75);
+        double[][] rk90I = applyRankFilter(noiseI, sq5, 0.90);
+        log.println("  Ранговые фильтры 5×5 (импульсный шум):");
+        log.println(String.format("    Rank=0.10: %5.2f дБ  Rank=0.25: %5.2f дБ  Rank=0.50: %5.2f дБ  Rank=0.75: %5.2f дБ  Rank=0.90: %5.2f дБ",
+            psnr(src, rk10I), psnr(src, rk25I), psnr(src, rk50I), psnr(src, rk75I), psnr(src, rk90I)));
 
-        // Инициализация k центров случайными пикселями
-        Random rng = new Random(seed);
-        double[][] centers = new double[k][3];
-        Set<Integer> chosen = new HashSet<>();
-        int ci = 0;
-        while (ci < k) {
-            int idx = rng.nextInt(N);
-            if (chosen.add(idx)) {
-                int rgb = pixels[idx];
-                centers[ci][0] = (rgb >> 16) & 0xFF;
-                centers[ci][1] = (rgb >> 8)  & 0xFF;
-                centers[ci][2] = rgb & 0xFF;
-                ci++;
-            }
-        }
+        save(makeRow(name + " — Импульсный шум 10%: сравнение фильтров",
+            new String[]{"Оригинал", "Шум (10%)", "Box 5×5", "Медиана 5×5",
+                         "Мед. диск r=2", "TrimMean α=10%", "TrimMean α=25%"},
+            new BufferedImage[]{origImg, toImage(noiseI), toImage(boxI5), toImage(medSq5I),
+                                toImage(medDisk2I), toImage(tm10I), toImage(tm25I)}),
+            outDir + "/" + name + "_impulse.png");
 
-        int[] assign = new int[N];
-        Arrays.fill(assign, -1);
+        save(makeRow(name + " — Импульсный шум: ранговый фильтр 5×5 (разные квантили)",
+            new String[]{"Оригинал", "Rank=0.10", "Rank=0.25", "Медиана(0.50)", "Rank=0.75", "Rank=0.90"},
+            new BufferedImage[]{origImg, toImage(rk10I), toImage(rk25I), toImage(rk50I),
+                                toImage(rk75I), toImage(rk90I)}),
+            outDir + "/" + name + "_rank_impulse.png");
 
-        for (int iter = 0; iter < maxIter; iter++) {
-            boolean changed = false;
-            // Назначение
-            for (int i = 0; i < N; i++) {
-                int rgb = pixels[i];
-                int R = (rgb >> 16) & 0xFF;
-                int G = (rgb >> 8)  & 0xFF;
-                int B = rgb & 0xFF;
-                int best = 0;
-                double bestDist = Double.MAX_VALUE;
-                for (int j = 0; j < k; j++) {
-                    double dR = R - centers[j][0];
-                    double dG = G - centers[j][1];
-                    double dB = B - centers[j][2];
-                    double dist = dR * dR + dG * dG + dB * dB;
-                    if (dist < bestDist) { bestDist = dist; best = j; }
-                }
-                if (assign[i] != best) { assign[i] = best; changed = true; }
-            }
-            if (!changed) break;
-            // Обновление центров
-            double[][] newC = new double[k][3];
-            int[] cnt = new int[k];
-            for (int i = 0; i < N; i++) {
-                int j = assign[i];
-                int rgb = pixels[i];
-                newC[j][0] += (rgb >> 16) & 0xFF;
-                newC[j][1] += (rgb >> 8)  & 0xFF;
-                newC[j][2] += rgb & 0xFF;
-                cnt[j]++;
-            }
-            for (int j = 0; j < k; j++) {
-                if (cnt[j] > 0) {
-                    centers[j][0] = newC[j][0] / cnt[j];
-                    centers[j][1] = newC[j][1] / cnt[j];
-                    centers[j][2] = newC[j][2] / cnt[j];
-                }
-            }
-        }
+        // ──────────────────── МОРФОЛОГИЧЕСКИЕ ОПЕРАЦИИ ───────────────────────────
 
-        BufferedImage out = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
-        for (int i = 0; i < N; i++) {
-            int j = assign[i];
-            int R = clampRound(centers[j][0]);
-            int G = clampRound(centers[j][1]);
-            int B = clampRound(centers[j][2]);
-            out.setRGB(i % w, i / w, (R << 16) | (G << 8) | B);
-        }
-        return out;
-    }
+        // Диск r=1 (маленький SE)
+        boolean[][] se1 = diskAperture(1);
+        double[][] er1   = erosion(src, se1);
+        double[][] dil1  = dilation(src, se1);
+        double[][] open1 = opening(src, se1);
+        double[][] clos1 = closing(src, se1);
+        double[][] th1   = tophat(src, se1);
+        double[][] bh1   = bothat(src, se1);
+        double[][] mg1   = morphGradient(src, se1);
 
-    // ── Сдвиг тона (HSV) ────────────────────────────────────────────────────────
+        save(makeRow(name + " — Морфологические операции (диск r=1)",
+            new String[]{"Оригинал", "Эрозия", "Наращение", "Открытие", "Закрытие"},
+            new BufferedImage[]{origImg, toImage(er1), toImage(dil1), toImage(open1), toImage(clos1)}),
+            outDir + "/" + name + "_morph_disk1.png");
 
-    static BufferedImage hueShift(BufferedImage img, double deltaDeg) {
-        int w = img.getWidth(), h = img.getHeight();
-        BufferedImage out = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
-        for (int y = 0; y < h; y++)
-            for (int x = 0; x < w; x++) {
-                int rgb = img.getRGB(x, y);
-                double[] hsv = rgbToHSV((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
-                double H = (hsv[0] + deltaDeg) % 360.0;
-                if (H < 0) H += 360.0;
-                int[] nrgb = hsvToRGB(H, hsv[1], hsv[2]);
-                out.setRGB(x, y, (nrgb[0] << 16) | (nrgb[1] << 8) | nrgb[2]);
-            }
-        return out;
-    }
+        save(makeRow(name + " — Верх/Низ шляпы и градиент (диск r=1)",
+            new String[]{"Оригинал", "Tophat", "Bothat", "Морф.градиент"},
+            new BufferedImage[]{origImg, normalizeToImage(th1), normalizeToImage(bh1), normalizeToImage(mg1)}),
+            outDir + "/" + name + "_morph_hat.png");
 
-    // ── Хромакей ─────────────────────────────────────────────────────────────────
+        // Диск r=2 (крупный SE)
+        boolean[][] se2 = diskAperture(2);
+        double[][] er2   = erosion(src, se2);
+        double[][] dil2  = dilation(src, se2);
+        double[][] open2 = opening(src, se2);
+        double[][] clos2 = closing(src, se2);
 
-    /**
-     * Удаляет пиксели с оттенком около targetHue ± hueTol (в градусах),
-     * насыщенностью > satThresh, заменяет на replaceRGB.
-     */
-    static BufferedImage chromaKey(BufferedImage img, double targetHue, double hueTol,
-                                   double satThresh, int replaceRGB) {
-        int w = img.getWidth(), h = img.getHeight();
-        BufferedImage out = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
-        for (int y = 0; y < h; y++)
-            for (int x = 0; x < w; x++) {
-                int rgb = img.getRGB(x, y);
-                double[] hsv = rgbToHSV((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
-                double H = hsv[0], S = hsv[1];
-                double diff = Math.abs(H - targetHue);
-                if (diff > 180.0) diff = 360.0 - diff;
-                if (diff <= hueTol && S > satThresh) {
-                    out.setRGB(x, y, replaceRGB);
-                } else {
-                    out.setRGB(x, y, rgb);
-                }
-            }
-        return out;
-    }
+        save(makeRow(name + " — Морфологические операции (диск r=2)",
+            new String[]{"Оригинал", "Эрозия r=2", "Наращение r=2", "Открытие r=2", "Закрытие r=2"},
+            new BufferedImage[]{origImg, toImage(er2), toImage(dil2), toImage(open2), toImage(clos2)}),
+            outDir + "/" + name + "_morph_disk2.png");
 
-    /** Создаёт синтетическое изображение: зелёный фон + белый круг. */
-    static BufferedImage syntheticGreenScreen(int w, int h, int circleR) {
-        BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
-        int green = (0 << 16) | (200 << 8) | 0;
-        int white = 0xFFFFFF;
-        int cx = w / 2, cy = h / 2;
-        for (int y = 0; y < h; y++)
-            for (int x = 0; x < w; x++) {
-                int dx = x - cx, dy = y - cy;
-                img.setRGB(x, y, (dx * dx + dy * dy <= circleR * circleR) ? white : green);
-            }
-        return img;
-    }
+        // Квадратный SE 5×5
+        double[][] erSq5 = erosion(src, sq5);
+        double[][] dilSq5= dilation(src, sq5);
+        double[][] opSq5 = opening(src, sq5);
+        double[][] clSq5 = closing(src, sq5);
 
-    // ── Конвертация изображения туда-обратно (для RMSE) ─────────────────────────
+        save(makeRow(name + " — Морфологические операции (квадрат 5×5)",
+            new String[]{"Оригинал", "Эрозия 5×5", "Наращение 5×5", "Открытие 5×5", "Закрытие 5×5"},
+            new BufferedImage[]{origImg, toImage(erSq5), toImage(dilSq5), toImage(opSq5), toImage(clSq5)}),
+            outDir + "/" + name + "_morph_sq5.png");
 
-    static BufferedImage reconstructHSV(BufferedImage img) {
-        int w = img.getWidth(), h = img.getHeight();
-        BufferedImage out = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
-        for (int y = 0; y < h; y++)
-            for (int x = 0; x < w; x++) {
-                int rgb = img.getRGB(x, y);
-                double[] hsv = rgbToHSV((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
-                int[] nrgb = hsvToRGB(hsv[0], hsv[1], hsv[2]);
-                out.setRGB(x, y, (nrgb[0] << 16) | (nrgb[1] << 8) | nrgb[2]);
-            }
-        return out;
-    }
-
-    static BufferedImage reconstructYCbCr(BufferedImage img) {
-        int w = img.getWidth(), h = img.getHeight();
-        BufferedImage out = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
-        for (int y = 0; y < h; y++)
-            for (int x = 0; x < w; x++) {
-                int rgb = img.getRGB(x, y);
-                double[] ycbcr = rgbToYCbCr((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
-                int[] nrgb = ycbcrToRGB(ycbcr[0], ycbcr[1], ycbcr[2]);
-                out.setRGB(x, y, (nrgb[0] << 16) | (nrgb[1] << 8) | nrgb[2]);
-            }
-        return out;
-    }
-
-    static BufferedImage reconstructLab(BufferedImage img) {
-        int w = img.getWidth(), h = img.getHeight();
-        BufferedImage out = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
-        for (int y = 0; y < h; y++)
-            for (int x = 0; x < w; x++) {
-                int rgb = img.getRGB(x, y);
-                double[] lab = rgbToLab((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
-                int[] nrgb = labToRGB(lab[0], lab[1], lab[2]);
-                out.setRGB(x, y, (nrgb[0] << 16) | (nrgb[1] << 8) | nrgb[2]);
-            }
-        return out;
+        log.println("  Морфологические операции сохранены (диск r=1, r=2; квадрат 5×5).");
+        log.println();
     }
 
     // ── main ─────────────────────────────────────────────────────────────────────
 
     public static void main(String[] args) throws IOException {
-        String outdir = "results5";
-        for (int i = 0; i < args.length - 1; i++) {
-            if (args[i].equals("--outdir")) outdir = args[i + 1];
-        }
-        new File(outdir).mkdirs();
+        String outDir = "results5";
+        for (int i = 0; i < args.length-1; i++)
+            if ("--outdir".equals(args[i])) outDir = args[i+1];
+        new File(outDir).mkdirs();
 
-        PrintWriter log = new PrintWriter(new FileWriter(outdir + "/log.txt"));
-
-        String[] inputs = {
-            "examples/baboon.png",
-            "examples/sonoma_photo.jpg",
-            "examples/circles.png",
-            "examples/checker.png"
-        };
-
-        log.println("=== Lab5: Цветовые пространства и обработка цветных изображений ===");
+        PrintWriter log = new PrintWriter(new FileWriter(outDir + "/log.txt", false));
+        log.println("Лабораторная работа №5: Ранговая фильтрация и морфологические операции");
+        log.println("Дата: " + new java.util.Date());
         log.println();
 
-        for (String path : inputs) {
-            File f = new File(path);
-            if (!f.exists()) {
-                log.println("SKIP (not found): " + path);
-                System.out.println("Skipping (not found): " + path);
-                continue;
-            }
-            BufferedImage img = loadRGB(path);
-            String name = f.getName().replaceFirst("\\.[^.]+$", "");
-            int w = img.getWidth(), h = img.getHeight();
-            log.println("--- " + name + " (" + w + "x" + h + ") ---");
-            System.out.println("Processing: " + name);
+        String[] paths = {"examples/baboon.png", "examples/circles.png",
+                          "examples/gradient.png", "examples/sonoma_photo.jpg"};
+        String[] names = {"baboon", "circles", "gradient", "sonoma_photo"};
 
-            // ── 1. RMSE верификация конвертаций ─────────────────────────────────
-            BufferedImage recHSV   = reconstructHSV(img);
-            BufferedImage recYCbCr = reconstructYCbCr(img);
-            BufferedImage recLab   = reconstructLab(img);
-
-            double rmseHSV   = rmse(img, recHSV);
-            double rmseYCbCr = rmse(img, recYCbCr);
-            double rmseLab   = rmse(img, recLab);
-
-            log.printf("  RMSE RGB->HSV->RGB:    %.4f%n", rmseHSV);
-            log.printf("  RMSE RGB->YCbCr->RGB:  %.4f%n", rmseYCbCr);
-            log.printf("  RMSE RGB->CIELab->RGB: %.4f%n", rmseLab);
-
-            // ── 2. Визуализация каналов ──────────────────────────────────────────
-
-            // RGB каналы
-            BufferedImage rCh = extractRGBChannel(img, 0);
-            BufferedImage gCh = extractRGBChannel(img, 1);
-            BufferedImage bCh = extractRGBChannel(img, 2);
-            save(makeRow(name + " — RGB channels", new String[]{"Original", "R", "G", "B"},
-                new BufferedImage[]{img, rCh, gCh, bCh}),
-                outdir + "/" + name + "_rgb_channels.png");
-
-            // HSV каналы
-            BufferedImage[] hsvChs = hsvChannelImages(img);
-            save(makeRow(name + " — HSV channels", new String[]{"Original", "H", "S", "V"},
-                new BufferedImage[]{img, hsvChs[0], hsvChs[1], hsvChs[2]}),
-                outdir + "/" + name + "_hsv_channels.png");
-
-            // YCbCr каналы
-            BufferedImage[] ycbcrChs = ycbcrChannelImages(img);
-            save(makeRow(name + " — YCbCr channels", new String[]{"Original", "Y", "Cb", "Cr"},
-                new BufferedImage[]{img, ycbcrChs[0], ycbcrChs[1], ycbcrChs[2]}),
-                outdir + "/" + name + "_ycbcr_channels.png");
-
-            // CIELab каналы
-            BufferedImage[] labChs = labChannelImages(img);
-            save(makeRow(name + " — CIELab channels", new String[]{"Original", "L", "a", "b"},
-                new BufferedImage[]{img, labChs[0], labChs[1], labChs[2]}),
-                outdir + "/" + name + "_lab_channels.png");
-
-            // ── 3. Эквализация гистограммы ───────────────────────────────────────
-            BufferedImage eqRGB   = histEqRGB(img);
-            BufferedImage eqHSV   = histEqHSV_V(img);
-            BufferedImage eqYCbCr = histEqYCbCr_Y(img);
-            save(makeRow(name + " — Histogram Equalization",
-                new String[]{"Original", "RGB (all ch)", "HSV (V ch)", "YCbCr (Y ch)"},
-                new BufferedImage[]{img, eqRGB, eqHSV, eqYCbCr}),
-                outdir + "/" + name + "_histeq.png");
-            log.println("  Saved histogram equalization: " + name + "_histeq.png");
-
-            // ── 4. Баланс белого (серый мир) ────────────────────────────────────
-            BufferedImage wb = grayWorldWhiteBalance(img);
-            save(makeRow(name + " — White Balance (Gray World)",
-                new String[]{"Original", "Corrected"},
-                new BufferedImage[]{img, wb}),
-                outdir + "/" + name + "_whitebalance.png");
-            log.println("  Saved white balance: " + name + "_whitebalance.png");
-
-            // ── 5. Квантизация k-means ───────────────────────────────────────────
-            BufferedImage q4  = kmeansQuantize(img,  4, 20, 42L);
-            BufferedImage q8  = kmeansQuantize(img,  8, 20, 42L);
-            BufferedImage q16 = kmeansQuantize(img, 16, 20, 42L);
-            save(makeRow(name + " — K-Means Quantization",
-                new String[]{"Original", "k=4", "k=8", "k=16"},
-                new BufferedImage[]{img, q4, q8, q16}),
-                outdir + "/" + name + "_quantize.png");
-            log.println("  Saved quantization: " + name + "_quantize.png");
-
-            // ── 6. Сдвиг тона ────────────────────────────────────────────────────
-            BufferedImage hs60  = hueShift(img,  60.0);
-            BufferedImage hs120 = hueShift(img, 120.0);
-            BufferedImage hs180 = hueShift(img, 180.0);
-            save(makeRow(name + " — Hue Shift",
-                new String[]{"Original", "+60°", "+120°", "+180°"},
-                new BufferedImage[]{img, hs60, hs120, hs180}),
-                outdir + "/" + name + "_hueshift.png");
-            log.println("  Saved hue shift: " + name + "_hueshift.png");
-
-            // ── 7. Хромакей ──────────────────────────────────────────────────────
-            // hue ~ 120° (green), tol=40°, saturation > 0.25, replace with white
-            int white = 0xFFFFFF;
-            BufferedImage keyed = chromaKey(img, 120.0, 40.0, 0.25, white);
-            save(makeRow(name + " — Chroma Key (green removal)",
-                new String[]{"Original", "Chroma-Keyed"},
-                new BufferedImage[]{img, keyed}),
-                outdir + "/" + name + "_chromakey.png");
-            log.println("  Saved chroma key: " + name + "_chromakey.png");
-
-            log.println();
+        for (int i = 0; i < paths.length; i++) {
+            File f = new File(paths[i]);
+            if (!f.exists()) { log.println("Не найден: " + paths[i]); continue; }
+            BufferedImage img = ImageIO.read(f);
+            if (img == null) { log.println("Не читается: " + paths[i]); continue; }
+            processImage(img, toDouble(getBrightness(img)), names[i], outDir, log);
         }
 
-        // ── Синтетический хромакей ────────────────────────────────────────────────
-        log.println("--- Synthetic Chroma Key Demo ---");
-        BufferedImage synth = syntheticGreenScreen(200, 200, 60);
-        BufferedImage synthKeyed = chromaKey(synth, 120.0, 40.0, 0.25, 0xFFFFFF);
-        save(makeRow("Chroma Key Demo (synthetic)",
-            new String[]{"Synthetic (green+circle)", "Chroma-Keyed"},
-            new BufferedImage[]{synth, synthKeyed}),
-            outdir + "/chromakey_demo.png");
-        log.println("  Saved chromakey_demo.png");
+        log.println("=== ВЫВОДЫ ===");
         log.println();
-        log.println("=== Done ===");
+        log.println("1. РАНГОВАЯ ФИЛЬТРАЦИЯ: ГАУССОВ ШУМ (σ²=400)");
+        log.println("   Усредняющий (box) 5×5: лучший PSNR среди линейных фильтров.");
+        log.println("   Все соседи вносят равный вклад → оптимально для гауссова шума (МНК оценка).");
+        log.println("   Медиана 5×5: чуть хуже box при гауссовом шуме (не использует все значения,");
+        log.println("   поэтому менее эффективна), но почти не уступает.");
+        log.println("   Усечённое среднее α=25%: промежуточный результат между box и медианой.");
+        log.println("   Чем больше alpha, тем ближе к медиане и хуже для гауссового шума.");
+        log.println("   Форма апертуры: диск vs квадрат — небольшая разница. Диск чуть сглаживает");
+        log.println("   границы меньше. Крест — хуже, т.к. меньше пикселей в апертуре.");
         log.println();
-        log.println("=== ВЫВОДЫ: ЦВЕТОВЫЕ ПРОСТРАНСТВА И ОПЕРАЦИИ ===");
+        log.println("2. РАНГОВАЯ ФИЛЬТРАЦИЯ: ИМПУЛЬСНЫЙ ШУМ (10% соль/перец)");
+        log.println("   Усредняющий (box) 5×5: частично подавляет, но не устраняет полностью.");
+        log.println("   Импульсные пиксели (0 или 255) разбавляются, но не исключаются.");
+        log.println("   Медиана 5×5: лучший результат. При 10% шуме медиана (50-й процентиль)");
+        log.println("   попадает в незашумлённую часть выборки, полностью устраняя импульсы.");
+        log.println("   Усечённое среднее α=25%: отсекает крайние 25% с обоих концов — импульсы");
+        log.println("   (соль и перец) попадают в отсекаемую область → результат близок к медиане.");
+        log.println("   При уровне шума >25% нужно увеличить alpha.");
+        log.println("   Взвешенная медиана: незначительное улучшение над обычной медианой, т.к.");
+        log.println("   центральный пиксель весит больше — полезно, если центр незашумлён.");
         log.println();
-        log.println("1. ТОЧНОСТЬ КОНВЕРТАЦИИ (RMSE = 0.0000 для всех пространств)");
-        log.println("   Конвертации RGB↔HSV, RGB↔YCbCr, RGB↔CIELab реализованы без потерь");
-        log.println("   (при целочисленных пикселях). Это важно: можно переходить между");
-        log.println("   пространствами для обработки, а затем возвращаться в RGB без артефактов.");
+        log.println("3. ПРОИЗВОЛЬНАЯ АПЕРТУРА");
+        log.println("   Квадрат: изотропен лишь приближённо (диагонали включены).");
+        log.println("   Диск: более изотропный — меньше угловых артефактов на краях объектов.");
+        log.println("   Крест: анизотропный (только 4 направления) — меньше пикселей → хуже PSNR,");
+        log.println("   но меньше размытие. Применяется в задачах с направленным шумом.");
+        log.println("   Ранговый фильтр обобщает медиану и min/max на любую форму апертуры.");
         log.println();
-        log.println("2. ЭКВАЛИЗАЦИЯ ГИСТОГРАММЫ — СРАВНЕНИЕ ПОДХОДОВ");
-        log.println("   RGB (все каналы независимо):");
-        log.println("     Нарушает баланс между R, G, B → сдвигает цветность изображения.");
-        log.println("     Результат визуально неестественный: контраст повышается, но оттенки искажаются.");
-        log.println();
-        log.println("   HSV (только канал V — яркость):");
-        log.println("     Повышает контраст, сохраняя оттенки (H) и насыщенность (S) неизменными.");
-        log.println("     Лучше, чем RGB, но V ≠ перцептуальная яркость → возможно пересвечивание.");
-        log.println();
-        log.println("   YCbCr (только канал Y — яркость по BT.601):");
-        log.println("     Эквализирует только яркостную компоненту, цветность (Cb, Cr) не трогает.");
-        log.println("     Наилучший результат: контраст улучшен, цвета визуально не изменены.");
-        log.println("     РЕКОМЕНДАЦИЯ: для обработки контраста цветных изображений использовать YCbCr(Y).");
-        log.println();
-        log.println("3. БАЛАНС БЕЛОГО (МЕТОД СЕРОГО МИРА)");
-        log.println("   Предположение: среднее R = среднее G = среднее B = общее среднее.");
-        log.println("   Работает хорошо на «нейтральных» сценах с разнообразными объектами.");
-        log.println("   Неэффективен, если сцена преимущественно одного цвета (monochromatic scene).");
-        log.println("   Для синтетических изображений (checker, circles) результат менее значим,");
-        log.println("   т.к. у них нет «истинного» белого баланса.");
-        log.println();
-        log.println("4. ЦВЕТОВОЕ ПРОСТРАНСТВО ДЛЯ РАЗНЫХ ЗАДАЧ");
-        log.println("   +-------------------------------+---------+----------+--------+");
-        log.println("   | Задача                        | RGB     | HSV      | YCbCr  |");
-        log.println("   +-------------------------------+---------+----------+--------+");
-        log.println("   | Эквализация гистограммы       | плохо   | удовл.   | хорошо |");
-        log.println("   | Сдвиг оттенка (hue shift)     | сложно  | просто   | сложно |");
-        log.println("   | Хромакей (удал. фон по цвету) | плохо   | хорошо   | плохо  |");
-        log.println("   | Сжатие (отдельно яркость/цвет)| нельзя  | можно    | лучше  |");
-        log.println("   | Цветокоррекция баланса белого | прямо   | сложнее  | прямо  |");
-        log.println("   | Перцептуальное расстояние     | неточно | неточно  | лучше  |");
-        log.println("   +-------------------------------+---------+----------+--------+");
-        log.println("   CIELab: лучшее перцептуальное пространство (ΔE = расстояние ≈ видимая разница),");
-        log.println("   но вычислительно дороже и не даёт преимуществ в простых операциях.");
-        log.println();
-        log.println("5. ХРОМАКЕЙ (УДАЛЕНИЕ ЗЕЛЁНОГО ФОНА)");
-        log.println("   HSV пространство идеально подходит: H задаёт оттенок (green ≈ 120°),");
-        log.println("   S отсеивает ненасыщенные (серые/белые) пиксели, V не используется.");
-        log.println("   Параметры: hueTol=40°, satThresh=0.25 дают чёткое отделение зелёного фона.");
-        log.println("   На RGB-пространстве аналогичную сегментацию реализовать значительно сложнее.");
-        log.println();
-        log.println("6. ЦВЕТОВАЯ КВАНТИЗАЦИЯ (K-MEANS)");
-        log.println("   k=4:  сильные артефакты постеризации, цвета грубо усреднены.");
-        log.println("   k=8:  заметные, но терпимые артефакты; подходит для пиктограмм/иконок.");
-        log.println("   k=16: визуально приемлемо для большинства изображений.");
-        log.println("   RGB-пространство для кластеризации suboptimal (неравномерность восприятия);");
-        log.println("   в практических задачах лучше кластеризовать в CIELab.");
-        log.println("=================================================");
+        log.println("4. ПОЛУТОНОВЫЕ МОРФОЛОГИЧЕСКИЕ ОПЕРАЦИИ");
+        log.println("   Эрозия (min в SE):");
+        log.println("     Затемняет и сужает светлые объекты. Удаляет мелкие светлые детали (<<SE).");
+        log.println("     Применение: удаление яркого шума, сужение объектов.");
+        log.println("   Наращение/дилатация (max в SE):");
+        log.println("     Осветляет и расширяет светлые объекты. Заполняет мелкие тёмные провалы.");
+        log.println("     Применение: заполнение разрывов, расширение объектов.");
+        log.println("   Открытие (эрозия + наращение):");
+        log.println("     Удаляет объекты меньше SE, сохраняет крупные. Сглаживает контуры.");
+        log.println("     Эффект: удаление мелких светлых структур без изменения крупных.");
+        log.println("   Закрытие (наращение + эрозия):");
+        log.println("     Заполняет тёмные дыры < SE в светлых объектах. Соединяет близкие объекты.");
+        log.println("     Эффект: сглаживание контуров с заполнением разрывов.");
+        log.println("   Tophat (src − opening): выделяет мелкие светлые объекты на тёмном фоне.");
+        log.println("   Bothat (closing − src): выделяет мелкие тёмные объекты на светлом фоне.");
+        log.println("   Морфологический градиент (dilation − erosion):");
+        log.println("     Выделяет границы объектов. Ширина линий пропорциональна SE.");
+        log.println("     В отличие от лапласиана, не усиливает высокочастотный гауссов шум,");
+        log.println("     но чувствителен к импульсному шуму (max и min реагируют на выбросы).");
+        log.println("     Для зашумлённых изображений применять после медианного фильтра.");
         log.close();
-        System.out.println("Done. Results in: " + outdir);
+        System.out.println("Результаты → " + outDir + "/");
     }
 }
