@@ -4,26 +4,8 @@ import java.awt.image.BufferedImage;
 import java.io.*;
 import java.util.*;
 
-/**
- * Лабораторная работа №4: Свёртка.
- *
- * Основное задание:
- *   - 2D свёртка для произвольного ядра
- *   - ФНЧ: усредняющий (box) и гауссовый фильтры
- *   - Усредняющий фильтр с порогом
- *   - ФВЧ: лапласиан и LoG
- *   - Детектирование границ через переходы нулевого уровня (LoG)
- *   - Фильтр повышения резкости (unsharp masking)
- *
- * Дополнительные задания:
- *   1. Усредняющий фильтр через интегральное изображение
- *   2. Билатеральный фильтр
- *   3. Нелинейный ФВЧ (морфологический градиент)
- *   4. Подбор оптимального sigma гауссова фильтра по PSNR
- */
+/** Лабораторная работа №4: Свёртка. */
 public class Lab4 {
-
-    // ── Вспомогательные функции ──────────────────────────────────────────────────
 
     static int[][] getBrightness(BufferedImage img) {
         int w = img.getWidth(), h = img.getHeight();
@@ -68,8 +50,6 @@ public class Lab4 {
         return mse < 1e-10 ? 99.99 : 10*Math.log10(255.0*255.0/mse);
     }
 
-    // ── Шум ──────────────────────────────────────────────────────────────────────
-
     /** Аддитивный гауссов шум с заданной дисперсией. */
     static double[][] addGaussianNoise(double[][] src, double variance, Random rng) {
         int h = src.length, w = src[0].length;
@@ -94,8 +74,6 @@ public class Lab4 {
             }
         return out;
     }
-
-    // ── 2D свёртка (основная операция) ───────────────────────────────────────────
 
     /**
      * 2D свёртка с зеркальным дополнением границ.
@@ -123,8 +101,6 @@ public class Lab4 {
             }
         return out;
     }
-
-    // ── Ядра фильтров ─────────────────────────────────────────────────────────────
 
     static double[][] boxKernel(int size) {
         double[][] k = new double[size][size];
@@ -163,13 +139,10 @@ public class Lab4 {
                 k[y][x] = -(1 - r2/(2*s2)) * Math.exp(-r2/(2*s2));
                 sum += k[y][x];
             }
-        // нормализуем, чтобы сумма равнялась 0 (DC-free)
         double mean = sum/(size*size);
         for (int y = 0; y < size; y++) for (int x = 0; x < size; x++) k[y][x] -= mean;
         return k;
     }
-
-    // ── ФНЧ ──────────────────────────────────────────────────────────────────────
 
     static double[][] boxFilter(double[][] src, int size) {
         return convolve(src, boxKernel(size));
@@ -179,16 +152,7 @@ public class Lab4 {
         return convolve(src, gaussianKernel(size, sigma));
     }
 
-    /**
-     * Усредняющий фильтр с порогом: вычисляет среднее по окну size×size,
-     * затем заменяет центральный пиксель средним, если |центр − среднее| > threshold.
-     * Иначе пиксель остаётся без изменений.
-     *
-     * Логика: пиксель считается «выбросом» относительно своего окружения и заменяется
-     * локальным средним. При импульсном шуме центральный зашумлённый пиксель (0 или 255)
-     * сильно отличается от соседей → он заменяется. Незашумлённые пиксели остаются
-     * неизменными, что снижает ненужное размытие.
-     */
+    /** Сглаживает если |пиксель − среднее| ≤ T, иначе сохраняет оригинал. */
     static double[][] thresholdAverageFilter(double[][] src, int size, double threshold) {
         int h = src.length, w = src[0].length;
         int r = size/2;
@@ -203,12 +167,10 @@ public class Lab4 {
                         sum += src[sy][sx]; cnt++;
                     }
                 double avg = sum / cnt;
-                out[y][x] = (Math.abs(src[y][x] - avg) > threshold) ? avg : src[y][x];
+                out[y][x] = (Math.abs(src[y][x] - avg) <= threshold) ? avg : src[y][x];
             }
         return out;
     }
-
-    // ── ФВЧ: лапласиан и LoG ─────────────────────────────────────────────────────
 
     static double[][] laplacianFilter(double[][] src) {
         return convolve(src, laplacian8Kernel());
@@ -218,7 +180,7 @@ public class Lab4 {
         return convolve(src, logKernel(size, sigma));
     }
 
-    /** Детектирование границ через переходы нулевого уровня (zero-crossing) LoG. */
+    /** Zero-crossing детектирование границ. */
     static double[][] zeroCrossing(double[][] log) {
         int h = log.length, w = log[0].length;
         double[][] edges = new double[h][w];
@@ -233,9 +195,7 @@ public class Lab4 {
         return edges;
     }
 
-    // ── Повышение резкости (unsharp masking) ─────────────────────────────────────
-
-    /** Unsharp masking: sharp = src + amount*(src - blur). */
+    /** Unsharp masking. */
     static double[][] sharpen(double[][] src, double sigma, double amount) {
         double[][] blur = gaussianFilter(src, kernelSize(sigma), sigma);
         int h = src.length, w = src[0].length;
@@ -247,16 +207,13 @@ public class Lab4 {
     }
 
     static int kernelSize(double sigma) {
-        int s = (int)Math.ceil(6*sigma) | 1; // нечётный
+        int s = (int)Math.ceil(6*sigma) | 1;
         return Math.max(3, s);
     }
-
-    // ── Дополнительное задание 1: box-фильтр через интегральное изображение ──────
 
     static double[][] integralBoxFilter(double[][] src, int size) {
         int h = src.length, w = src[0].length;
         int r = size / 2;
-        // Зеркальное дополнение — чтобы граничная обработка совпадала с convolve().
         int ph = h + 2*r, pw = w + 2*r;
         double[][] padded = new double[ph][pw];
         for (int y = 0; y < ph; y++)
@@ -269,7 +226,6 @@ public class Lab4 {
                 sx = Math.max(0, Math.min(w-1, sx));
                 padded[y][x] = src[sy][sx];
             }
-        // Интегральное изображение по дополненному массиву.
         double[][] ii = new double[ph+1][pw+1];
         for (int y = 0; y < ph; y++)
             for (int x = 0; x < pw; x++)
@@ -278,15 +234,12 @@ public class Lab4 {
         double area = size * size;
         for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++) {
-                // Окно [y..y+size-1][x..x+size-1] в padded-координатах.
                 int y2 = y + size, x2 = x + size;
                 double s = ii[y2][x2] - ii[y][x2] - ii[y2][x] + ii[y][x];
                 out[y][x] = s / area;
             }
         return out;
     }
-
-    // ── Дополнительное задание 2: билатеральный фильтр ───────────────────────────
 
     static double[][] bilateralFilter(double[][] src, int size, double sigmaS, double sigmaR) {
         int h = src.length, w = src[0].length;
@@ -312,8 +265,6 @@ public class Lab4 {
         return out;
     }
 
-    // ── Дополнительное задание 3: нелинейный ФВЧ (морфологический градиент) ──────
-
     static double[][] morphGradient(double[][] src, int size) {
         int h = src.length, w = src[0].length;
         int r = size/2;
@@ -337,8 +288,6 @@ public class Lab4 {
         return out;
     }
 
-    // ── Дополнительное задание 4: подбор оптимального sigma по PSNR ──────────────
-
     static double findBestSigma(double[][] clean, double[][] noisy) {
         double bestPsnr = -1, bestSigma = 1.0;
         for (double sigma = 0.5; sigma <= 5.0; sigma += 0.25) {
@@ -349,9 +298,6 @@ public class Lab4 {
         return bestSigma;
     }
 
-    // ── Сохранение сравнительных изображений ─────────────────────────────────────
-
-    /** Строка с N панелями: заголовок + подписи + изображения. */
     static BufferedImage row(String title, String[] labels, BufferedImage[] imgs) {
         int pad = 6, topH = 26, labH = 16;
         int maxH = 0;
@@ -387,18 +333,15 @@ public class Lab4 {
         return toImage(norm);
     }
 
-    // ── Обработка одного изображения ─────────────────────────────────────────────
-
     static void processImage(BufferedImage origImg, double[][] src, String name,
                              String outDir, PrintWriter log) throws IOException {
         int h = src.length, w = src[0].length;
         log.println("=== " + name + " (" + w + "×" + h + ") ===");
 
         Random rng = new Random(42);
-        double[][] noiseG = addGaussianNoise(src, 400, rng);     // σ²=400, σ≈20
-        double[][] noiseI = addImpulseNoise(src, 0.1, rng);      // 10% соль/перец
+        double[][] noiseG = addGaussianNoise(src, 400, rng);
+        double[][] noiseI = addImpulseNoise(src, 0.1, rng);
 
-        // ── ФНЧ на гауссовом шуме ────────────────────────────────────────────────
         double[][] boxG3    = boxFilter(noiseG, 3);
         double[][] boxG7    = boxFilter(noiseG, 7);
         double[][] gaussG   = gaussianFilter(noiseG, 9, 2.0);
@@ -416,7 +359,6 @@ public class Lab4 {
                                 toImage(gaussG), toImage(thrG)}),
             outDir + "/" + name + "_lpf_gaussian.png");
 
-        // ── ФНЧ на импульсном шуме ───────────────────────────────────────────────
         double[][] boxI3    = boxFilter(noiseI, 3);
         double[][] boxI7    = boxFilter(noiseI, 7);
         double[][] gaussI   = gaussianFilter(noiseI, 9, 2.0);
@@ -434,7 +376,6 @@ public class Lab4 {
                                 toImage(gaussI), toImage(thrI)}),
             outDir + "/" + name + "_lpf_impulse.png");
 
-        // ── ФВЧ: лапласиан, LoG, zero-crossing, резкость ────────────────────────
         double[][] lap     = laplacianFilter(src);
         double[][] logImg  = logFilter(src, 11, 2.0);
         double[][] zeroCr  = zeroCrossing(logImg);
@@ -448,12 +389,10 @@ public class Lab4 {
 
         log.println("  ФВЧ сохранён.");
 
-        // ── Доп. 1: интегральное изображение ────────────────────────────────────
         double[][] intBox = integralBoxFilter(src, 7);
         double[][] convBox = boxFilter(src, 7);
         log.println(String.format("  Интегральный box 7×7: PSNR vs свёртка = %.1f dB", psnr(convBox, intBox)));
 
-        // ── Доп. 2: билатеральный фильтр ─────────────────────────────────────────
         double[][] bilG = bilateralFilter(noiseG, 9, 3.0, 30.0);
         double[][] bilI = bilateralFilter(noiseI, 9, 3.0, 50.0);
         log.println(String.format("  Bilateral (гауссов шум):  PSNR=%.2f dB", psnr(src, bilG)));
@@ -464,7 +403,6 @@ public class Lab4 {
             new BufferedImage[]{origImg, toImage(noiseG), toImage(bilG), toImage(noiseI), toImage(bilI)}),
             outDir + "/" + name + "_bilateral.png");
 
-        // ── Доп. 3: нелинейный ФВЧ (морфологический градиент) ────────────────────
         double[][] morphG3 = morphGradient(src, 3);
         double[][] morphG5 = morphGradient(src, 5);
 
@@ -475,7 +413,6 @@ public class Lab4 {
 
         log.println("  Морф. градиент сохранён.");
 
-        // ── Доп. 4: подбор sigma по PSNR ─────────────────────────────────────────
         double bestSigmaG = findBestSigma(src, noiseG);
         double bestSigmaI = findBestSigma(src, noiseI);
         double[][] bestFiltG = gaussianFilter(noiseG, kernelSize(bestSigmaG), bestSigmaG);
@@ -492,8 +429,6 @@ public class Lab4 {
 
         log.println();
     }
-
-    // ── main ─────────────────────────────────────────────────────────────────────
 
     public static void main(String[] args) throws IOException {
         String outDir = "results4";

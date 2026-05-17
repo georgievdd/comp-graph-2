@@ -4,34 +4,14 @@ import java.awt.image.BufferedImage;
 import java.io.*;
 import java.util.Arrays;
 
-/**
- * ДЗ: улучшение видимости слабоконтрастного текста в изображении 9.tif.
- *
- * Изображение содержит одновременно:
- *   – слабоконтрастный светлый текст на тёмном фоне
- *   – слабоконтрастный тёмный текст на светлом фоне
- *
- * Методы (все — из лекции 7):
- *   1. Глобальная эквализация гистограммы (базовая линия)
- *   2. Адаптивная эквализация по тайлам (CLAHE) — лекция 7, «Улучшение глобального и локального контраста»
- *   3. Нерезкое маскирование (Unsharp Mask) — лекция 7
- *   4. Ретинекс SSR — лекция 7
- *   5. Фильтр уменьшения длины перепада (сигмоида) — лекция 7
- *   6. Вычитание фона (Background Subtraction) — лекция 7
- *
- * Критерий качества: среднее значение локального контраста Михельсона по тайлам 32×32:
- *   Q = mean_tile{ (max_tile − min_tile) / (max_tile + min_tile + 1) }
- */
+/** ДЗ: улучшение видимости слабоконтрастного текста (9.tif). */
 public class DZ {
-
-    // ── Вспомогательные функции ──────────────────────────────────────────────────
 
     static double[][] readGray(String path) throws IOException {
         BufferedImage img = ImageIO.read(new File(path));
         if (img == null) throw new IOException("Не удалось прочитать: " + path);
         int w = img.getWidth(), h = img.getHeight();
         double[][] out = new double[h][w];
-        // Конвертируем в полутоновое
         BufferedImage gray = new BufferedImage(w, h, BufferedImage.TYPE_BYTE_GRAY);
         Graphics2D g = gray.createGraphics();
         g.drawImage(img, 0, 0, null);
@@ -60,7 +40,6 @@ public class DZ {
 
     static double clamp(double v) { return Math.max(0, Math.min(255, v)); }
 
-    /** Масштабирует изображение для превью. */
     static BufferedImage scale(BufferedImage img, int maxW, int maxH) {
         double sx = (double)maxW / img.getWidth(), sy = (double)maxH / img.getHeight();
         double s = Math.min(sx, sy);
@@ -72,8 +51,6 @@ public class DZ {
         g.dispose();
         return out;
     }
-
-    // ── Гауссов фильтр (разделяемый) ─────────────────────────────────────────────
 
     static double[] gaussKernel(double sigma) {
         int r = (int)Math.ceil(3 * sigma);
@@ -89,7 +66,6 @@ public class DZ {
         int r = (int)Math.ceil(3*sigma);
         double[] k = gaussKernel(sigma);
         double[][] tmp = new double[h][w];
-        // горизонтальный проход
         for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++) {
                 double sum = 0;
@@ -98,7 +74,6 @@ public class DZ {
                 tmp[y][x] = sum;
             }
         double[][] out = new double[h][w];
-        // вертикальный проход
         for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++) {
                 double sum = 0;
@@ -109,10 +84,7 @@ public class DZ {
         return out;
     }
 
-    // ── Метод 1: Глобальная эквализация гистограммы (лекция 7) ───────────────────
-    //
-    //   H'(i) = Σ_{j<i} H(j)  →  equalized(x,y) = H'(src(x,y)), нормализовано в [0,255]
-
+    /** Глобальная эквализация гистограммы. */
     static double[][] histEq(double[][] src) {
         int h = src.length, w = src[0].length, total = h*w;
         int[] hist = new int[256];
@@ -129,18 +101,12 @@ public class DZ {
         return out;
     }
 
-    // ── Метод 2: Адаптивная эквализация гистограммы (CLAHE) (лекция 7) ───────────
-    //
-    //   «для каждой области — своя TRC на основе локальной гистограммы,
-    //   для плавного перехода TRC интерполируется между узлами сетки»
-    //   Ограничение контраста (clip) предотвращает усиление шума.
-
+    /** CLAHE с билинейной интерполяцией TRC между тайлами. */
     static double[][] clahe(double[][] src, int tileSize, double clipLimit) {
         int h = src.length, w = src[0].length;
         int tilesX = (int)Math.ceil((double)w / tileSize);
         int tilesY = (int)Math.ceil((double)h / tileSize);
 
-        // Эквализирующие отображения для каждого тайла
         double[][] tileMap = new double[tilesY * tilesX][256];
 
         for (int tj = 0; tj < tilesY; tj++) {
@@ -149,13 +115,11 @@ public class DZ {
                 int x0 = ti * tileSize, x1 = Math.min(w, x0 + tileSize);
                 int area = (y1-y0) * (x1-x0);
 
-                // Гистограмма тайла
                 int[] hist = new int[256];
                 for (int y = y0; y < y1; y++)
                     for (int x = x0; x < x1; x++)
                         hist[(int)clamp(src[y][x])]++;
 
-                // Ограничение контраста: обрезаем пики, избыток распределяем равномерно
                 int clipCount = Math.max(1, (int)(clipLimit * area / 256.0));
                 int excess = 0;
                 for (int i = 0; i < 256; i++)
@@ -163,7 +127,6 @@ public class DZ {
                 int perBin = excess / 256;
                 for (int i = 0; i < 256; i++) hist[i] += perBin;
 
-                // CDF → TRC: отображение яркости [0,255]
                 long cdf = 0;
                 int idx = tj * tilesX + ti;
                 for (int i = 0; i < 256; i++) {
@@ -173,17 +136,14 @@ public class DZ {
             }
         }
 
-        // Билинейная интерполяция TRC между центрами соседних тайлов
         double[][] out = new double[h][w];
         for (int y = 0; y < h; y++) {
             for (int x = 0; x < w; x++) {
-                // Позиция пикселя в пространстве тайловых центров (центр тайла (i,j) = i*ts+ts/2)
                 double qx = (x - tileSize * 0.5) / tileSize;
                 double qy = (y - tileSize * 0.5) / tileSize;
                 int i0 = (int)Math.floor(qx), i1 = i0 + 1;
                 int j0 = (int)Math.floor(qy), j1 = j0 + 1;
                 double wx = qx - i0, wy = qy - j0;
-                // Зажимаем индексы тайлов в допустимый диапазон
                 i0 = Math.max(0, Math.min(tilesX-1, i0));
                 i1 = Math.max(0, Math.min(tilesX-1, i1));
                 j0 = Math.max(0, Math.min(tilesY-1, j0));
@@ -198,12 +158,7 @@ public class DZ {
         return out;
     }
 
-    // ── Метод 3: Нерезкое маскирование — Unsharp Mask (лекция 7) ────────────────
-    //
-    //   I'(r,c) = I(r,c) + k × (I(r,c) − LPF(I,r,c))  если |I − LPF| > T
-    //            = I(r,c)                                 иначе
-    //   LPF = гауссов фильтр; (I − LPF) = высокие частоты
-
+    /** I' = I + k*(I - Gauss(I)) если |I - Gauss(I)| > T. */
     static double[][] unsharpMask(double[][] src, double sigma, double k, double T) {
         int h = src.length, w = src[0].length;
         double[][] blur = gaussianFilter(src, sigma);
@@ -216,12 +171,7 @@ public class DZ {
         return out;
     }
 
-    // ── Метод 4: Ретинекс SSR (лекция 7) ────────────────────────────────────────
-    //
-    //   I' = log(I+1) − log(LPF(I)+1)
-    //   Оценивает «отражательную способность» объекта, исключая освещённость.
-    //   Нормализуется в [0,255].
-
+    /** Retinex SSR: log(I+1) - log(LPF(I)+1). */
     static double[][] retinexSSR(double[][] src, double sigma) {
         int h = src.length, w = src[0].length;
         double[][] blur = gaussianFilter(src, sigma);
@@ -241,28 +191,17 @@ public class DZ {
         return out;
     }
 
-    // ── Метод 5: Фильтр уменьшения длины перепада (лекция 7) ───────────────────
-    //
-    //   Для каждого тайла:
-    //     L = среднее среди 25% наименьших значений
-    //     H = среднее среди 25% наибольших значений
-    //     Если H − L > T:
-    //       нормализовать [L,H] → [0,1]
-    //       применить сигмоиду: y = x²/(x²+(1−x)²)
-    //       масштабировать обратно в [L,H]
-    //   Для плавности тайловых границ применяется финальный мягкий гауссов фильтр.
-
     static double sigmoid(double x) {
         x = Math.max(0, Math.min(1, x));
         return x*x / (x*x + (1-x)*(1-x));
     }
 
+    /** Локальная сигмоида по тайлам. */
     static double[][] localSigmoidFilter(double[][] src, int tileSize, double T) {
         int h = src.length, w = src[0].length;
         int tilesX = (int)Math.ceil((double)w / tileSize);
         int tilesY = (int)Math.ceil((double)h / tileSize);
 
-        // Карты L и H по тайлам (центры)
         double[] Lmap = new double[tilesX * tilesY];
         double[] Hmap = new double[tilesX * tilesY];
 
@@ -277,7 +216,6 @@ public class DZ {
                     for (int x = x0; x < x1; x++)
                         vals[idx2++] = src[y][x];
                 Arrays.sort(vals);
-                // L = среднее нижних 25%
                 int q25 = Math.max(1, n/4);
                 double L = 0, H = 0;
                 for (int i = 0; i < q25; i++) L += vals[i];
@@ -288,11 +226,9 @@ public class DZ {
             }
         }
 
-        // Применяем сигмоиду с билинейной интерполяцией L и H между тайлами
         double[][] out = new double[h][w];
         for (int y = 0; y < h; y++) {
             for (int x = 0; x < w; x++) {
-                // Билинейная интерполяция L/H (те же веса, что в CLAHE)
                 double qx = (x - tileSize * 0.5) / tileSize;
                 double qy = (y - tileSize * 0.5) / tileSize;
                 int i0 = Math.max(0, Math.min(tilesX-1, (int)Math.floor(qx)));
@@ -306,7 +242,6 @@ public class DZ {
                          + wy *((1-wx)*Hmap[j1*tilesX+i0] + wx*Hmap[j1*tilesX+i1]);
 
                 double v = src[y][x];
-                // Зажать в [L, H]
                 double vc = Math.max(L, Math.min(H, v));
                 if (H - L > T) {
                     double t = (vc - L) / (H - L);     // нормализовать в [0,1]
@@ -320,12 +255,7 @@ public class DZ {
         return out;
     }
 
-    // ── Метод 6: Вычитание фона (лекция 7) ───────────────────────────────────────
-    //
-    //   bg = LPF(I, σ_large)
-    //   I'(r,c) = (I(r,c) − bg(r,c)) + 128
-    //   Убирает неравномерный фон; эквивалентно усилению ВЧ-составляющей.
-
+    /** I' = (I - Gauss(I, σ)) + 128. */
     static double[][] backgroundSubtract(double[][] src, double sigma) {
         int h = src.length, w = src[0].length;
         double[][] bg = gaussianFilter(src, sigma);
@@ -335,12 +265,6 @@ public class DZ {
                 out[y][x] = clamp(src[y][x] - bg[y][x] + 128);
         return out;
     }
-
-    // ── Критерий качества: среднее локальное значение контраста Михельсона ────────
-    //
-    //   Q = mean_tile{ (max_tile − min_tile) / (max_tile + min_tile + 1) }
-    //   Q ∈ [0,1]; выше — лучше (больше локальный контраст текст/фон).
-    //   Тайлы 32×32 соответствуют размеру нескольких символов текста.
 
     static double michelsonContrast(double[][] img, int tileSize) {
         int h = img.length, w = img[0].length;
@@ -362,7 +286,6 @@ public class DZ {
         return count > 0 ? sum / count : 0;
     }
 
-    // Глобальное стандартное отклонение
     static double globalStd(double[][] img) {
         int h = img.length, w = img[0].length;
         double mean = 0;
@@ -372,8 +295,6 @@ public class DZ {
         for (double[] row : img) for (double v : row) var += (v-mean)*(v-mean);
         return Math.sqrt(var / (h*w));
     }
-
-    // ── Компоновка ───────────────────────────────────────────────────────────────
 
     static BufferedImage makeGrid(String[] titles, BufferedImage[] imgs, int cols) {
         int n = imgs.length, rows = (n + cols-1) / cols;
@@ -396,8 +317,6 @@ public class DZ {
         g.dispose();
         return out;
     }
-
-    // ── Main ─────────────────────────────────────────────────────────────────────
 
     public static void main(String[] args) throws IOException {
         String outDir = "results_dz";

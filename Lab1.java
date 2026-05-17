@@ -4,26 +4,9 @@ import java.awt.image.BufferedImage;
 import java.io.*;
 import java.util.*;
 
-/**
- * Лабораторная работа №1: Анализ изображений.
- *
- * Запуск:
- *   java Lab1 <изображение1> [изображение2 ...] [--outdir <папка_результатов>]
- *
- * Если изображения не переданы — обрабатываются все PNG из папки examples/.
- * По умолчанию результаты пишутся в папку results/.
- *
- * Для каждого изображения:
- *   - вычисляются все статистики и записываются в results/statistics.txt
- *   - GLCM сохраняется как PNG (логарифмическая шкала яркости)
- *   - строится график PSNR(дисперсия) и сохраняется как PNG
- *   - сохраняется зашумлённая версия (дисперсия 400)
- */
+/** Лабораторная работа №1: Анализ изображений. */
 public class Lab1 {
 
-    // ─────────────────────────────────────────────────────────────────
-    //  Яркость (luminance BT.601)
-    // ─────────────────────────────────────────────────────────────────
     public static int[][] getBrightness(BufferedImage image) {
         int w = image.getWidth(), h = image.getHeight();
         int[][] brightness = new int[h][w];
@@ -38,9 +21,6 @@ public class Lab1 {
         return brightness;
     }
 
-    // ─────────────────────────────────────────────────────────────────
-    //  Гистограмма
-    // ─────────────────────────────────────────────────────────────────
     public static int[] histogram(int[][] brightness) {
         int[] hist = new int[256];
         for (int[] row : brightness)
@@ -49,9 +29,6 @@ public class Lab1 {
         return hist;
     }
 
-    // ─────────────────────────────────────────────────────────────────
-    //  Среднее
-    // ─────────────────────────────────────────────────────────────────
     public static double mean(int[][] brightness) {
         long sum = 0;
         int count = 0;
@@ -60,9 +37,6 @@ public class Lab1 {
         return (double) sum / count;
     }
 
-    // ─────────────────────────────────────────────────────────────────
-    //  Дисперсия
-    // ─────────────────────────────────────────────────────────────────
     public static double variance(int[][] brightness) {
         double m = mean(brightness);
         double sum = 0;
@@ -72,9 +46,6 @@ public class Lab1 {
         return sum / count;
     }
 
-    // ─────────────────────────────────────────────────────────────────
-    //  Квартили
-    // ─────────────────────────────────────────────────────────────────
     public static double[] quartiles(int[][] brightness) {
         int[] sorted = flatten(brightness);
         Arrays.sort(sorted);
@@ -101,9 +72,6 @@ public class Lab1 {
         return flat;
     }
 
-    // ─────────────────────────────────────────────────────────────────
-    //  Энтропия
-    // ─────────────────────────────────────────────────────────────────
     public static double entropy(int[][] brightness) {
         int[] hist = histogram(brightness);
         int total = 0;
@@ -117,9 +85,6 @@ public class Lab1 {
         return ent;
     }
 
-    // ─────────────────────────────────────────────────────────────────
-    //  Энергия гистограммы
-    // ─────────────────────────────────────────────────────────────────
     public static double energy(int[][] brightness) {
         int[] hist = histogram(brightness);
         int total = 0;
@@ -129,9 +94,6 @@ public class Lab1 {
         return e;
     }
 
-    // ─────────────────────────────────────────────────────────────────
-    //  Асимметрия (skewness)
-    // ─────────────────────────────────────────────────────────────────
     public static double skewness(int[][] brightness) {
         double m = mean(brightness);
         double sigma = Math.sqrt(variance(brightness));
@@ -142,9 +104,6 @@ public class Lab1 {
         return sum / count;
     }
 
-    // ─────────────────────────────────────────────────────────────────
-    //  Эксцесс (excess kurtosis)
-    // ─────────────────────────────────────────────────────────────────
     public static double kurtosis(int[][] brightness) {
         double m = mean(brightness);
         double sigma = Math.sqrt(variance(brightness));
@@ -155,9 +114,6 @@ public class Lab1 {
         return sum / count - 3.0;
     }
 
-    // ─────────────────────────────────────────────────────────────────
-    //  GLCM (матрица совместной встречаемости)
-    // ─────────────────────────────────────────────────────────────────
     public static double[][] glcm(int[][] brightness, int dr, int dc) {
         int levels = 256;
         double[][] matrix = new double[levels][levels];
@@ -178,28 +134,15 @@ public class Lab1 {
         return matrix;
     }
 
-    // ─────────────────────────────────────────────────────────────────
-    //  Энергия GLCM
-    // ─────────────────────────────────────────────────────────────────
     public static double glcmEnergy(double[][] glcm) {
         double e = 0;
         for (double[] row : glcm) for (double v : row) e += v * v;
         return e;
     }
 
-    // ─────────────────────────────────────────────────────────────────
-    //  Сохранение GLCM как изображение (логарифмическая шкала яркости)
-    //
-    //  Идея: значения вблизи диагонали намного больше остальных,
-    //  поэтому линейная шкала показала бы только диагональ. Логарифм
-    //  log(1 + k*p) «растягивает» малые значения, делая видимой
-    //  структуру матрицы (пики вдоль диагонали для однородных текстур,
-    //  размытие для зашумлённых, широкие полосы для градиентных).
-    // ─────────────────────────────────────────────────────────────────
     public static void saveGlcmImage(double[][] glcm, String path) throws IOException {
         int levels = glcm.length;
-        final double K = 1e4; // масштаб перед логарифмом
-        // найдём максимум для нормировки
+        final double K = 1e4;
         double maxLog = 0;
         for (double[] row : glcm)
             for (double v : row) {
@@ -219,9 +162,6 @@ public class Lab1 {
         ImageIO.write(img, "png", new File(path));
     }
 
-    // ─────────────────────────────────────────────────────────────────
-    //  Добавление AWGN
-    // ─────────────────────────────────────────────────────────────────
     public static BufferedImage addGaussianNoise(BufferedImage image, double noiseVariance) {
         Random rng = new Random(42);
         double sigma = Math.sqrt(noiseVariance);
@@ -240,9 +180,6 @@ public class Lab1 {
 
     private static int clamp(int v) { return Math.max(0, Math.min(255, v)); }
 
-    // ─────────────────────────────────────────────────────────────────
-    //  PSNR
-    // ─────────────────────────────────────────────────────────────────
     public static double psnr(BufferedImage original, BufferedImage noisy) {
         int w = original.getWidth(), h = original.getHeight();
         double mse = 0; int count = 0;
@@ -259,26 +196,16 @@ public class Lab1 {
         return 10.0 * Math.log10(255.0 * 255.0 / mse);
     }
 
-    // ─────────────────────────────────────────────────────────────────
-    //  График PSNR(дисперсия шума) — сохраняется как PNG
-    //
-    //  По теории: PSNR ≈ 10·log10(255²/σ²) + const,
-    //  т.е. линейно убывает (в дБ) при росте σ² (в дБ).
-    //  На практике из-за клиппирования наклон немного меньше −10 dB/dec.
-    // ─────────────────────────────────────────────────────────────────
     public static void savePsnrPlot(BufferedImage original, String path) throws IOException {
-        // диапазон дисперсий: от 1 до 4000, 40 точек
         int nPoints = 40;
         double[] variances = new double[nPoints];
         double[] psnrValues = new double[nPoints];
         double vMin = 1, vMax = 4000;
         for (int i = 0; i < nPoints; i++) {
-            // логарифмическая шкала по оси X для равномерного покрытия
             variances[i] = Math.exp(Math.log(vMin) + i * (Math.log(vMax) - Math.log(vMin)) / (nPoints - 1));
             psnrValues[i] = psnr(original, addGaussianNoise(original, variances[i]));
         }
 
-        // Размеры холста
         int W = 800, H = 500;
         int left = 80, right = 40, top = 50, bottom = 70;
         int plotW = W - left - right, plotH = H - top - bottom;
@@ -287,11 +214,9 @@ public class Lab1 {
         Graphics2D g = chart.createGraphics();
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
-        // Фон
         g.setColor(Color.WHITE);
         g.fillRect(0, 0, W, H);
 
-        // Определяем диапазон Y
         double psnrMin = Double.MAX_VALUE, psnrMax = -Double.MAX_VALUE;
         for (double p : psnrValues) {
             if (Double.isFinite(p)) { psnrMin = Math.min(psnrMin, p); psnrMax = Math.max(psnrMax, p); }
@@ -299,7 +224,6 @@ public class Lab1 {
         psnrMin = Math.floor(psnrMin / 5) * 5;
         psnrMax = Math.ceil(psnrMax / 5) * 5 + 5;
 
-        // Сетка и подписи Y
         g.setFont(new Font("SansSerif", Font.PLAIN, 11));
         g.setColor(new Color(220, 220, 220));
         int ySteps = (int) ((psnrMax - psnrMin) / 5);
@@ -312,7 +236,6 @@ public class Lab1 {
             g.setColor(new Color(220, 220, 220));
         }
 
-        // Подписи X (логарифмическая шкала)
         double[] xTicks = {1, 5, 10, 50, 100, 500, 1000, 2000, 4000};
         g.setColor(Color.DARK_GRAY);
         for (double xt : xTicks) {
@@ -324,12 +247,10 @@ public class Lab1 {
             g.drawString(String.valueOf((int) xt), px - 10, top + plotH + 18);
         }
 
-        // Оси
         g.setColor(Color.BLACK);
         g.setStroke(new BasicStroke(1.5f));
         g.drawRect(left, top, plotW, plotH);
 
-        // Кривая
         g.setColor(new Color(30, 100, 200));
         g.setStroke(new BasicStroke(2.0f));
         int[] xs = new int[nPoints], ys = new int[nPoints];
@@ -341,18 +262,15 @@ public class Lab1 {
         for (int i = 0; i < nPoints - 1; i++)
             g.drawLine(xs[i], ys[i], xs[i + 1], ys[i + 1]);
 
-        // Точки
         g.setColor(new Color(200, 50, 50));
         for (int i = 0; i < nPoints; i++)
             g.fillOval(xs[i] - 3, ys[i] - 3, 7, 7);
 
-        // Подписи осей
         g.setColor(Color.BLACK);
         g.setFont(new Font("SansSerif", Font.BOLD, 13));
         g.drawString("PSNR (дБ)", 8, top + plotH / 2 + 5);
         g.drawString("Дисперсия шума σ²", left + plotW / 2 - 70, H - 15);
 
-        // Заголовок
         g.setFont(new Font("SansSerif", Font.BOLD, 14));
         g.drawString("Зависимость PSNR от дисперсии шума (логарифмическая ось X)", left, top - 15);
 
@@ -361,9 +279,6 @@ public class Lab1 {
         ImageIO.write(chart, "png", new File(path));
     }
 
-    // ─────────────────────────────────────────────────────────────────
-    //  Печать гистограммы в поток (текстовая)
-    // ─────────────────────────────────────────────────────────────────
     private static void printHistogram(int[] hist, PrintWriter out) {
         int maxVal = 0;
         for (int c : hist) maxVal = Math.max(maxVal, c);
@@ -377,9 +292,6 @@ public class Lab1 {
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────
-    //  Полный анализ одного изображения
-    // ─────────────────────────────────────────────────────────────────
     public static void analyzeImage(BufferedImage image, String imageName,
                                     PrintWriter statsWriter, String outputDir) throws IOException {
         new File(outputDir).mkdirs();
@@ -391,7 +303,6 @@ public class Lab1 {
         System.out.println(header);
         statsWriter.println(header);
 
-        // ── Гистограмма ──────────────────────────────────────────────
         int[] hist = histogram(brightness);
         PrintWriter both = new PrintWriter(new OutputStream() {
             @Override public void write(int b) {
@@ -406,7 +317,6 @@ public class Lab1 {
         });
         printHistogram(hist, both);
 
-        // ── Основные статистики ───────────────────────────────────────
         double m = mean(brightness);
         double v = variance(brightness);
         double[] q = quartiles(brightness);
@@ -429,7 +339,6 @@ public class Lab1 {
         System.out.println(stats);
         statsWriter.println(stats);
 
-        // ── GLCM ─────────────────────────────────────────────────────
         int[][] directions = {{0, 1}, {1, 0}, {1, 1}, {1, -1}};
         String[] dirNames  = {"horiz(0,1)", "vert(1,0)", "diag(1,1)", "anti(1,-1)"};
 
@@ -440,7 +349,6 @@ public class Lab1 {
             double ge = glcmEnergy(glcmMatrix);
             glcmSb.append(String.format("  [%s]  Энергия GLCM = %.8f%n", dirNames[d], ge));
 
-            // сохраняем как изображение
             String glcmPath = outputDir + "/" + imageName + "_glcm_" + dirNames[d].replaceAll("[^a-zA-Z0-9]", "_") + ".png";
             saveGlcmImage(glcmMatrix, glcmPath);
             glcmSb.append(String.format("         Сохранена: %s%n", glcmPath));
@@ -448,7 +356,6 @@ public class Lab1 {
         System.out.print(glcmSb);
         statsWriter.print(glcmSb);
 
-        // ── PSNR при дисперсии 400 ────────────────────────────────────
         double noiseVar = 400.0;
         BufferedImage noisy = addGaussianNoise(image, noiseVar);
         double psnrVal = psnr(image, noisy);
@@ -470,7 +377,6 @@ public class Lab1 {
         System.out.println(noiseStats);
         statsWriter.println(noiseStats);
 
-        // ── График PSNR(дисперсия) ────────────────────────────────────
         String psnrPlotPath = outputDir + "/" + imageName + "_psnr_plot.png";
         System.out.println("\nГенерация графика PSNR(дисперсия)...");
         savePsnrPlot(image, psnrPlotPath);
@@ -481,11 +387,7 @@ public class Lab1 {
         statsWriter.flush();
     }
 
-    // ─────────────────────────────────────────────────────────────────
-    //  main
-    // ─────────────────────────────────────────────────────────────────
     public static void main(String[] args) throws IOException {
-        // разбор аргументов
         java.util.List<String> imagePaths = new ArrayList<>();
         String outputDir = "results";
 
@@ -497,7 +399,6 @@ public class Lab1 {
             }
         }
 
-        // если пути не переданы — берём все PNG из examples/
         if (imagePaths.isEmpty()) {
             File exDir = new File("examples");
             if (exDir.exists() && exDir.isDirectory()) {
@@ -542,7 +443,6 @@ public class Lab1 {
                 statsWriter.println("ОШИБКА: не удалось прочитать — " + path);
                 continue;
             }
-            // имя файла без расширения — используем как идентификатор
             String name = f.getName().replaceAll("\\.[^.]+$", "");
             analyzeImage(image, name, statsWriter, outputDir);
         }
@@ -554,7 +454,6 @@ public class Lab1 {
         System.out.println("\nВсе результаты сохранены в папке: " + outputDir);
         System.out.println("Сводная статистика: " + statsFilePath);
 
-        // ── Выводы о GLCM ────────────────────────────────────────────
         System.out.println("""
 
 === ВЫВОДЫ О МАТРИЦЕ СОВМЕСТНОЙ ВСТРЕЧАЕМОСТИ ===
@@ -578,7 +477,6 @@ public class Lab1 {
    похожи), окружённое диффузным фоном (наличие границ и текстур).
 """);
 
-        // ── Выводы о PSNR(дисперсия) ─────────────────────────────────
         System.out.println("""
 === ВЫВОДЫ О ЗАВИСИМОСТИ PSNR ОТ ДИСПЕРСИИ ШУМА ===
 Теоретически для аддитивного гауссового шума:

@@ -4,25 +4,8 @@ import java.awt.image.BufferedImage;
 import java.io.*;
 import java.util.*;
 
-/**
- * Лабораторная работа №5: Ранговая фильтрация и морфологические операции.
- *
- * Основное задание:
- *   1. Ранговая фильтрация для произвольной апертуры (квадрат, диск, крест)
- *   2. Фильтр усечённого среднего (trimmed mean)
- *   3. PSNR сравнение: ранговый, усечённое среднее, усредняющий (box), медианный
- *      — аддитивный гауссов шум (σ²=400)
- *      — импульсный шум (10% соль/перец)
- *   4. Полутоновые морфологические операции: эрозия, наращение, открытие, закрытие
- *
- * Дополнительные задания:
- *   5. Взвешенная медиана
- *   6. Верх шляпы (tophat) и низ шляпы (bothat)
- *   7. Морфологический градиент (дилатация − эрозия) vs. линейный лапласиан
- */
+/** Лабораторная работа №5: Нелинейные фильтры (ранговая фильтрация, морфология). */
 public class Lab5 {
-
-    // ── Вспомогательные функции ──────────────────────────────────────────────────
 
     static int[][] getBrightness(BufferedImage img) {
         int w = img.getWidth(), h = img.getHeight();
@@ -78,8 +61,6 @@ public class Lab5 {
         return mse < 1e-10 ? 99.99 : 10*Math.log10(255.0*255.0/mse);
     }
 
-    // ── Генерация шума ────────────────────────────────────────────────────────────
-
     static double[][] addGaussianNoise(double[][] src, double variance, Random rng) {
         int h = src.length, w = src[0].length;
         double sigma = Math.sqrt(variance);
@@ -103,16 +84,12 @@ public class Lab5 {
         return out;
     }
 
-    // ── Апертуры ─────────────────────────────────────────────────────────────────
-
-    /** Квадратная апертура N×N (все пиксели включены). */
     static boolean[][] squareAperture(int size) {
         boolean[][] ap = new boolean[size][size];
         for (boolean[] row : ap) Arrays.fill(row, true);
         return ap;
     }
 
-    /** Дисковая (круглая) апертура радиуса r. Размер (2r+1)×(2r+1). */
     static boolean[][] diskAperture(int radius) {
         int size = 2*radius + 1;
         boolean[][] ap = new boolean[size][size];
@@ -124,7 +101,6 @@ public class Lab5 {
         return ap;
     }
 
-    /** Крестообразная апертура. */
     static boolean[][] crossAperture(int radius) {
         int size = 2*radius + 1;
         boolean[][] ap = new boolean[size][size];
@@ -140,8 +116,6 @@ public class Lab5 {
         for (boolean[] r : ap) for (boolean v : r) if (v) cnt++;
         return cnt;
     }
-
-    // ── Сбор значений в апертуре ─────────────────────────────────────────────────
 
     static double[] collectNeighbors(double[][] src, int cy, int cx, boolean[][] aperture) {
         int h = src.length, w = src[0].length;
@@ -160,12 +134,7 @@ public class Lab5 {
         return vals;
     }
 
-    // ── Ранговая фильтрация ───────────────────────────────────────────────────────
-
-    /**
-     * Ранговый фильтр для произвольной апертуры.
-     * rankFraction ∈ [0.0, 1.0]: 0.0 = минимум, 0.5 = медиана, 1.0 = максимум.
-     */
+    /** rankFraction: 0.0 = min, 0.5 = median, 1.0 = max. */
     static double[][] applyRankFilter(double[][] src, boolean[][] aperture, double rankFraction) {
         int h = src.length, w = src[0].length;
         double[][] out = new double[h][w];
@@ -184,13 +153,7 @@ public class Lab5 {
     static double[][] minFilter(double[][] src, boolean[][] ap)     { return applyRankFilter(src, ap, 0.0); }
     static double[][] maxFilter(double[][] src, boolean[][] ap)     { return applyRankFilter(src, ap, 1.0); }
 
-    // ── Фильтр усечённого среднего ────────────────────────────────────────────────
-
-    /**
-     * Фильтр усечённого среднего (trimmed mean).
-     * alpha ∈ [0, 0.5): доля значений, отбрасываемых с каждого конца отсортированного ряда.
-     * alpha=0 ↔ обычное среднее;  alpha→0.5 ↔ медиана.
-     */
+    /** alpha ∈ [0, 0.5): доля отсекаемых с каждого конца. */
     static double[][] applyTrimmedMeanFilter(double[][] src, boolean[][] aperture, double alpha) {
         int h = src.length, w = src[0].length;
         double[][] out = new double[h][w];
@@ -208,25 +171,16 @@ public class Lab5 {
         return out;
     }
 
-    /** Усредняющий (box) фильтр для произвольной апертуры (trimmed mean с alpha=0). */
     static double[][] boxFilter(double[][] src, boolean[][] aperture) {
         return applyTrimmedMeanFilter(src, aperture, 0.0);
     }
 
-    // ── Взвешенная медиана (доп. задание 5) ─────────────────────────────────────
-
-    /**
-     * Взвешенная медиана: каждый пиксель окрестности получает вес,
-     * обратно пропорциональный расстоянию до центра (1/(1+dist)).
-     * Для нахождения медианы: взвешенная медиана — точка, где CDF весов переходит через 0.5.
-     */
     static double[][] weightedMedianFilter(double[][] src, boolean[][] aperture) {
         int h = src.length, w = src[0].length;
         int ar = aperture.length/2, ac = aperture[0].length/2;
         double[][] out = new double[h][w];
         for (int y = 0; y < h; y++) {
             for (int x = 0; x < w; x++) {
-                // Collect (value, weight) pairs
                 double[] vals = collectNeighbors(src, y, x, aperture);
                 double[] weights = new double[vals.length];
                 int idx = 0;
@@ -236,7 +190,6 @@ public class Lab5 {
                             double dist = Math.sqrt(dy*dy + dx*dx);
                             weights[idx++] = 1.0 / (1.0 + dist);
                         }
-                // Sort by value
                 Integer[] order = new Integer[vals.length];
                 for (int i = 0; i < order.length; i++) order[i] = i;
                 Arrays.sort(order, (a, b) -> Double.compare(vals[a], vals[b]));
@@ -253,29 +206,27 @@ public class Lab5 {
         return out;
     }
 
-    // ── Морфологические операции ─────────────────────────────────────────────────
-
-    /** Эрозия — минимальное значение в окне структурирующего элемента. */
+    /** Эрозия (min в SE). */
     static double[][] erosion(double[][] src, boolean[][] se) {
         return minFilter(src, se);
     }
 
-    /** Наращение (дилатация) — максимальное значение в окне структурирующего элемента. */
+    /** Дилатация (max в SE). */
     static double[][] dilation(double[][] src, boolean[][] se) {
         return maxFilter(src, se);
     }
 
-    /** Открытие: эрозия, затем наращение тем же SE. Удаляет мелкие светлые объекты. */
+    /** Открытие: эрозия + дилатация. */
     static double[][] opening(double[][] src, boolean[][] se) {
         return dilation(erosion(src, se), se);
     }
 
-    /** Закрытие: наращение, затем эрозия тем же SE. Заполняет мелкие тёмные пробелы. */
+    /** Закрытие: дилатация + эрозия. */
     static double[][] closing(double[][] src, boolean[][] se) {
         return erosion(dilation(src, se), se);
     }
 
-    /** Верх шляпы (tophat) = src − opening. Выделяет мелкие светлые структуры. */
+    /** Tophat = src − opening. */
     static double[][] tophat(double[][] src, boolean[][] se) {
         double[][] open = opening(src, se);
         int h = src.length, w = src[0].length;
@@ -286,7 +237,7 @@ public class Lab5 {
         return out;
     }
 
-    /** Низ шляпы (bothat) = closing − src. Выделяет мелкие тёмные структуры. */
+    /** Bothat = closing − src. */
     static double[][] bothat(double[][] src, boolean[][] se) {
         double[][] close = closing(src, se);
         int h = src.length, w = src[0].length;
@@ -297,7 +248,7 @@ public class Lab5 {
         return out;
     }
 
-    /** Морфологический градиент = dilation − erosion. Выделяет границы. */
+    /** Морфологический градиент = dilation − erosion. */
     static double[][] morphGradient(double[][] src, boolean[][] se) {
         double[][] dil = dilation(src, se);
         double[][] er  = erosion(src, se);
@@ -308,8 +259,6 @@ public class Lab5 {
                 out[y][x] = dil[y][x] - er[y][x];
         return out;
     }
-
-    // ── Визуализация ─────────────────────────────────────────────────────────────
 
     static BufferedImage makeRow(String title, String[] labels, BufferedImage[] imgs) {
         int pad = 6, topH = 28, labH = 16;
@@ -335,8 +284,6 @@ public class Lab5 {
         return out;
     }
 
-    // ── Обработка одного изображения ─────────────────────────────────────────────
-
     static void processImage(BufferedImage origImg, double[][] src, String name,
                              String outDir, PrintWriter log) throws IOException {
         int h = src.length, w = src[0].length;
@@ -353,7 +300,6 @@ public class Lab5 {
         boolean[][] disk1 = diskAperture(1);      // диск r=1 (5 px, крест с углами)
         boolean[][] cross3= crossAperture(2);     // крест r=2
 
-        // ──────────────────── ГАУССОВ ШУМ ────────────────────────────────────────
         double pNoiseG = psnr(src, noiseG);
         double[][] boxG5    = boxFilter(noiseG, sq5);
         double[][] medSq5G  = medianFilter(noiseG, sq5);
@@ -396,7 +342,6 @@ public class Lab5 {
                                 toImage(rk75G), toImage(rk90G)}),
             outDir + "/" + name + "_rank_gaussian.png");
 
-        // ──────────────────── ИМПУЛЬСНЫЙ ШУМ ─────────────────────────────────────
         double pNoiseI = psnr(src, noiseI);
         double[][] boxI5    = boxFilter(noiseI, sq5);
         double[][] medSq5I  = medianFilter(noiseI, sq5);
@@ -437,9 +382,6 @@ public class Lab5 {
                                 toImage(rk75I), toImage(rk90I)}),
             outDir + "/" + name + "_rank_impulse.png");
 
-        // ──────────────────── МОРФОЛОГИЧЕСКИЕ ОПЕРАЦИИ ───────────────────────────
-
-        // Диск r=1 (маленький SE)
         boolean[][] se1 = diskAperture(1);
         double[][] er1   = erosion(src, se1);
         double[][] dil1  = dilation(src, se1);
@@ -485,8 +427,6 @@ public class Lab5 {
         log.println("  Морфологические операции сохранены (диск r=1, r=2; квадрат 5×5).");
         log.println();
     }
-
-    // ── main ─────────────────────────────────────────────────────────────────────
 
     public static void main(String[] args) throws IOException {
         String outDir = "results5";

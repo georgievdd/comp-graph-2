@@ -4,21 +4,10 @@ import java.awt.image.BufferedImage;
 import java.io.*;
 import java.util.*;
 
-/**
- * Лабораторная работа №3: Геометрические преобразования и интерполяция.
- *
- * Основное задание:
- *   Поворот изображения на произвольный угол: ближайший сосед, билинейная,
- *   бикубическая интерполяция. Сравнение по качеству (PSNR) и времени.
- *
- * Дополнительные задания:
- *   1. Скос (shear) изображения.
- *   2. Поворот + масштабирование.
- *   3. Поворот in-situ через разложение на три скоса (без доп. буфера памяти).
- */
+/** Лабораторная работа №3: Геометрические преобразования и интерполяция. */
 public class Lab3 {
 
-    // ── Вспомогательные функции ──────────────────────────────────────────────────
+
 
     static int[][] getBrightness(BufferedImage img) {
         int w = img.getWidth(), h = img.getHeight();
@@ -89,7 +78,7 @@ public class Lab3 {
         ImageIO.write(img, ext, new File(path));
     }
 
-    // ── Методы интерполяции ──────────────────────────────────────────────────────
+
 
     enum Method { NN, BILINEAR, BICUBIC }
 
@@ -150,7 +139,7 @@ public class Lab3 {
         return 0;
     }
 
-    // ── Поворот (основное задание) ────────────────────────────────────────────────
+
 
     /**
      * Поворот на angleDeg градусов (обратное проецирование).
@@ -187,7 +176,7 @@ public class Lab3 {
             double dy = oy - dstCy;
             for (int ox = 0; ox < dstW; ox++) {
                 double dx = ox - dstCx;
-                // Обратное вращение
+
                 double sx = cx + dx*cos + dy*sin;
                 double sy = cy - dx*sin + dy*cos;
                 dst[oy][ox] = interp(src, sx, sy, m);
@@ -196,7 +185,7 @@ public class Lab3 {
         return dst;
     }
 
-    // ── Масштабирование (для оценки качества интерполяции) ───────────────────────
+
 
     /** Уменьшение в 2 раза усреднением 2×2 блоков. */
     static double[][] downsample2x(double[][] src) {
@@ -224,7 +213,7 @@ public class Lab3 {
         return out;
     }
 
-    // ── Скос (дополнительное задание 1) ──────────────────────────────────────────
+
 
     /** Горизонтальный скос: x' = x + shear*y. */
     static double[][] shearX(double[][] src, double shear, Method m) {
@@ -260,7 +249,7 @@ public class Lab3 {
         return dst;
     }
 
-    // ── Поворот + масштабирование (дополнительное задание 2) ─────────────────────
+
 
     /** Поворот на angleDeg + масштабирование (scale > 1 = увеличение). */
     static double[][] rotateScale(double[][] src, double angleDeg, double scale, Method m) {
@@ -281,11 +270,7 @@ public class Lab3 {
         return dst;
     }
 
-    // ── Поворот in-situ через 3 скоса (дополнительное задание 3) ─────────────────
-    //
-    // Разложение: R(θ) = Sx(-tan(θ/2)) · Sy(sin(θ)) · Sx(-tan(θ/2))
-    // Каждый скос выполняется сдвигом строк/столбцов (целочисленный, ближайший сосед),
-    // что не требует дополнительного буфера памяти (in-place cyclic shift на строке).
+    // R(θ) = Sx(-tan(θ/2)) · Sy(sin(θ)) · Sx(-tan(θ/2))
 
     static void shiftRowInPlace(int[] row, int shift) {
         int w = row.length;
@@ -315,11 +300,7 @@ public class Lab3 {
         }
     }
 
-    /**
-     * Поворот in-situ через три последовательных скоса.
-     * Используется целочисленное смещение строк/столбцов — никакого доп. буфера.
-     * Точность — ближайший сосед, зато O(1) памяти.
-     */
+    /** Поворот in-situ через три скоса, O(1) памяти, ближайший сосед. */
     static void rotateInSitu(int[][] img, double angleDeg) {
         int h = img.length, w = img[0].length;
         double rad = Math.toRadians(angleDeg);
@@ -340,7 +321,7 @@ public class Lab3 {
             shiftRowInPlace(img[y], (int)Math.round(-tanHalf * (y - cy)));
     }
 
-    // ── Сохранение результатов ────────────────────────────────────────────────────
+
 
     static BufferedImage makeComparisonRow(String title, String[] labels,
                                            BufferedImage[] imgs) {
@@ -369,7 +350,7 @@ public class Lab3 {
         return out;
     }
 
-    // ── Обработка одного изображения ─────────────────────────────────────────────
+
 
     static void processImage(BufferedImage origImg, double[][] src,
                              String name, String outDir,
@@ -379,7 +360,7 @@ public class Lab3 {
 
         double[] angles = {30, 45, 90, 135};
 
-        // ── Поворот: сравнение методов ───────────────────────────────────────────
+
         log.println("  Поворот (время):");
         for (double angle : angles) {
             long t0, t1;
@@ -400,7 +381,7 @@ public class Lab3 {
                 "    %5.0f°  NN: %4dms | BL: %4dms | BC: %4dms",
                 angle, msNN, msBL, msBC));
 
-            // Сохранить сравнение
+
             String angleStr = String.format("%03.0f", angle);
             BufferedImage cmp = makeComparisonRow(
                 name + " — поворот на " + (int)angle + "°",
@@ -415,7 +396,7 @@ public class Lab3 {
             saveImage(cmp, outDir + "/" + name + "_rot" + angleStr + "_comparison.png");
         }
 
-        // ── Доп. задание 1: Скос ──────────────────────────────────────────────────
+
         log.println("  Скос (shear X = 0.5):");
         double[][] shNN = shearX(src, 0.5, Method.NN);
         double[][] shBL = shearX(src, 0.5, Method.BILINEAR);
@@ -427,7 +408,7 @@ public class Lab3 {
         saveImage(shCmp, outDir + "/" + name + "_shear_comparison.png");
         log.println("    Сохранено.");
 
-        // ── Доп. задание 2: Поворот + масштаб ────────────────────────────────────
+
         log.println("  Поворот 45° + масштаб ×1.5:");
         double[][] rsNN = rotateScale(src, 45, 1.5, Method.NN);
         double[][] rsBL = rotateScale(src, 45, 1.5, Method.BILINEAR);
@@ -439,21 +420,21 @@ public class Lab3 {
         saveImage(rsCmp, outDir + "/" + name + "_rot45_scale_comparison.png");
         log.println("    Сохранено.");
 
-        // ── Доп. задание 3: Поворот in-situ через 3 скоса ────────────────────────
+
         log.println("  Поворот in-situ (3 скоса, 45°):");
         int[][] inSitu = new int[h][w];
         for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++) inSitu[y][x] = (int)src[y][x];
         rotateInSitu(inSitu, 45);
 
-        // Сравнение in-situ с обычным bilienar
+
         double[][] rotBL45 = rotate(src, 45, Method.BILINEAR, false);
         double[] inSituD = new double[h*w], rotBL45D = new double[h*w];
         for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) {
             inSituD[y*w+x] = inSitu[y][x];
             rotBL45D[y*w+x] = rotBL45[y][x];
         }
-        // Build double[][] for PSNR
+
         double[][] inSitu2D = new double[h][w];
         for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) inSitu2D[y][x] = inSitu[y][x];
         log.println(String.format("    PSNR(in-situ vs билинейная, оба — прямой поворот 45°): %.2f dB",
@@ -469,7 +450,7 @@ public class Lab3 {
         log.println();
     }
 
-    // ── main ─────────────────────────────────────────────────────────────────────
+
 
     public static void main(String[] args) throws IOException {
         String outDir = "results3";

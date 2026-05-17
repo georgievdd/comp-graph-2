@@ -5,23 +5,8 @@ import java.io.*;
 import java.util.*;
 import java.util.List;
 
-/**
- * Лабораторная работа №6: Сегментация и вычисление признаков.
- *
- * Основное задание:
- *   1. Бинаризация (порог Оцу): максимизация межклассовой дисперсии σ²b = ω₀ω₁(μ₀−μ₁)²
- *   2. Разметка 4-связных областей (двухпроходный алгоритм + Union-Find)
- *   3. Геом. моменты 0-го и 1-го порядков; центральные геом. моменты 2-го порядка
- *   4. Число областей с площадью > 30 пкс, похожих на круг (Kr2 < 1.3)
- *
- * Дополнительные задания:
- *   5. Разметка 8-связных областей методом заливки с затравкой (FloodFill)
- *   6. Фильтрация областей на изображении по признакам (площадь, форма)
- *   7. Распределение объектов по ориентации
- */
+/** Лабораторная работа №6: Сегментация и вычисление признаков. */
 public class Lab6 {
-
-    // ── Вспомогательные функции ──────────────────────────────────────────────────
 
     static double[][] getBrightness(BufferedImage img) {
         int w = img.getWidth(), h = img.getHeight();
@@ -50,12 +35,6 @@ public class Lab6 {
         ImageIO.write(img, "png", new File(path));
     }
 
-    // ── Алгоритм Оцу ─────────────────────────────────────────────────────────────
-    //
-    //   Максимизирует межклассовую дисперсию (лекция 9):
-    //   σ²b(t) = ω₀(t)·ω₁(t)·(μ₀(t) − μ₁(t))²
-    //   Эквивалентно минимизации внутриклассовой: σ²w = ω₀σ²₀ + ω₁σ²₁
-
     static int otsuThreshold(double[][] src) {
         int h = src.length, w = src[0].length;
         int total = h * w;
@@ -64,7 +43,6 @@ public class Lab6 {
             for (int x = 0; x < w; x++)
                 hist[Math.max(0, Math.min(255, (int)src[y][x]))]++;
 
-        // Общая сумма яркостей
         double sum = 0;
         for (int i = 0; i < 256; i++) sum += (double)i * hist[i];
 
@@ -84,10 +62,11 @@ public class Lab6 {
                 threshold = t;
             }
         }
+        if (threshold == 0 && hist[0] > 0) threshold = 1;
         return threshold;
     }
 
-    /** Бинаризация: true = передний план (пиксель ≥ порог). */
+    /** Бинаризация: true = передний план. */
     static boolean[][] binarize(double[][] src, int threshold) {
         int h = src.length, w = src[0].length;
         boolean[][] bin = new boolean[h][w];
@@ -106,8 +85,6 @@ public class Lab6 {
         return img;
     }
 
-    // ── Union-Find (для двухпроходного алгоритма CCL) ────────────────────────────
-
     static int[] ufParent;
 
     static void ufInit(int n) {
@@ -115,10 +92,9 @@ public class Lab6 {
         for (int i = 0; i <= n; i++) ufParent[i] = i;
     }
 
-    // Поиск с сжатием пути
     static int ufFind(int x) {
         while (ufParent[x] != x) {
-            ufParent[x] = ufParent[ufParent[x]]; // двухшаговое сжатие
+            ufParent[x] = ufParent[ufParent[x]];
             x = ufParent[x];
         }
         return x;
@@ -129,15 +105,7 @@ public class Lab6 {
         if (ra != rb) ufParent[ra] = rb;
     }
 
-    // ── 4-связная разметка: двухпроходный алгоритм (лекция 9) ──────────────────
-    //
-    //   Первый проход: сканируем слева→направо, сверху→вниз.
-    //     – Нет размеченных 4-соседей (выше, левее) → новая метка.
-    //     – Один размеченный сосед → присвоить его метку.
-    //     – Два разных соседа → присвоить меньший, внести в таблицу эквивалентности.
-    //   Второй проход: заменить все метки на корневую (через Union-Find).
-
-    static int lastNumLabels = 0; // число меток после последней разметки
+    static int lastNumLabels = 0;
 
     static int[][] labelComponents4(boolean[][] bin) {
         int h = bin.length, w = bin[0].length;
@@ -145,21 +113,18 @@ public class Lab6 {
         ufInit(h * w + 2);
         int nextLabel = 1;
 
-        // Первый проход
         for (int y = 0; y < h; y++) {
             for (int x = 0; x < w; x++) {
                 if (!bin[y][x]) continue;
                 int above = (y > 0) ? labels[y-1][x] : 0;
                 int left  = (x > 0) ? labels[y][x-1] : 0;
                 if (above == 0 && left == 0) {
-                    // Нет размеченных соседей — новая метка
                     labels[y][x] = nextLabel++;
                 } else if (above == 0) {
                     labels[y][x] = ufFind(left);
                 } else if (left == 0) {
                     labels[y][x] = ufFind(above);
                 } else {
-                    // Два соседа: объединяем эквивалентные метки
                     int ra = ufFind(above), rl = ufFind(left);
                     if (ra != rl) ufUnion(ra, rl);
                     labels[y][x] = ufFind(ra);
@@ -167,7 +132,6 @@ public class Lab6 {
             }
         }
 
-        // Второй проход: нормализуем метки (0, 1, 2, ...)
         Map<Integer,Integer> remap = new HashMap<>();
         int count = 0;
         for (int y = 0; y < h; y++) {
@@ -181,12 +145,6 @@ public class Lab6 {
         lastNumLabels = count;
         return labels;
     }
-
-    // ── 8-связная разметка: заливка с затравкой (FloodFill, лекция 9) ───────────
-    //
-    //   Для каждого непомеченного пикселя переднего плана:
-    //     1. Назначить новую метку, добавить в стек.
-    //     2. Пока стек не пуст: извлечь пиксель, пометить всех 8-соседей той же меткой.
 
     static int[][] labelComponents8(boolean[][] bin) {
         int h = bin.length, w = bin[0].length;
@@ -218,22 +176,17 @@ public class Lab6 {
         return labels;
     }
 
-    // ── Моменты и признаки формы (лекция 10) ─────────────────────────────────────
-
     static class Region {
         int   label;
-        double m00;              // Геом. момент 0-го порядка: m₀₀ = ΣΣ p(x,y) = площадь
-        double m10, m01;         // Геом. моменты 1-го порядка: m₁₀ = ΣΣ x·p, m₀₁ = ΣΣ y·p
-        double xc, yc;           // Центроид: xc = m10/m00, yc = m01/m00
-        double mu20, mu02, mu11; // Центральные геом. моменты 2-го порядка
-        double kr2;              // Округлость: Kr2 = 2π(μ₂₀+μ₀₂)/S² ≈ 1 для круга
-        double orientation;      // Угол большой оси (рад): ½·arctan(2μ₁₁/(μ₂₀−μ₀₂))
+        double m00;
+        double m10, m01;
+        double xc, yc;
+        double mu20, mu02, mu11;
+        double kr2;
+        double orientation;
     }
 
-    /**
-     * Вычисляет геом. моменты 0-го, 1-го порядков и центральные 2-го порядка.
-     * Все формулы — из лекции 10.
-     */
+    /** Геом. моменты 0-го, 1-го порядков и центральные 2-го порядка. */
     static Region[] computeRegions(int[][] labels, int numLabels) {
         if (numLabels == 0) return new Region[0];
         int h = labels.length, w = labels[0].length;
@@ -241,7 +194,6 @@ public class Lab6 {
         double[] m10 = new double[numLabels+1];
         double[] m01 = new double[numLabels+1];
 
-        // Первый проход: моменты 0-го и 1-го порядков
         for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++) {
                 int lbl = labels[y][x];
@@ -259,8 +211,6 @@ public class Lab6 {
                 ycArr[lbl] = m01[lbl] / m00[lbl];
             }
 
-        // Второй проход: центральные моменты 2-го порядка
-        // μ_pq = ΣΣ (x−xc)ᵖ(y−yc)ᵍ·p(x,y)
         double[] mu20 = new double[numLabels+1];
         double[] mu02 = new double[numLabels+1];
         double[] mu11 = new double[numLabels+1];
@@ -282,18 +232,13 @@ public class Lab6 {
             r.m00 = m00[lbl]; r.m10 = m10[lbl]; r.m01 = m01[lbl];
             r.xc = xcArr[lbl]; r.yc = ycArr[lbl];
             r.mu20 = mu20[lbl]; r.mu02 = mu02[lbl]; r.mu11 = mu11[lbl];
-            // Округлость Kr2 = 2π(μ₂₀+μ₀₂)/S² (лекция 10); для круга Kr2=1
             r.kr2 = (r.m00 > 0) ? 2*Math.PI*(r.mu20+r.mu02)/(r.m00*r.m00) : Double.MAX_VALUE;
-            // Угол большой оси эллипса: Amajor = ½·arctan(2μ₁₁/(μ₂₀−μ₀₂)) (лекция 10)
             r.orientation = 0.5 * Math.atan2(2*r.mu11, r.mu20 - r.mu02);
             regions[i] = r;
         }
         return regions;
     }
 
-    // ── Визуализация ─────────────────────────────────────────────────────────────
-
-    /** Псевдоцветная карта меток (равномерно по тону HSV). */
     static BufferedImage colorLabels(int[][] labels, int numLabels) {
         int h = labels.length, w = labels[0].length;
         int[] palette = new int[Math.max(numLabels, 1) + 1];
@@ -308,10 +253,6 @@ public class Lab6 {
         return img;
     }
 
-    /**
-     * Накладывает выбранные области поверх полутонового изображения.
-     * showMask[lbl-1] = true → закрасить регион заданным цветом.
-     */
     static BufferedImage overlayRegions(double[][] src, int[][] labels,
                                         boolean[] showMask, Color color) {
         int h = src.length, w = src[0].length;
@@ -330,12 +271,11 @@ public class Lab6 {
         return img;
     }
 
-    /** Гистограмма ориентаций (рад → градусы, −90°…+90°). */
     static BufferedImage orientationHistogram(List<Region> regions) {
-        int bins = 18; // шаг 10°
+        int bins = 18;
         int[] hist = new int[bins];
         for (Region r : regions) {
-            double deg = Math.toDegrees(r.orientation); // −90..+90
+            double deg = Math.toDegrees(r.orientation);
             int bin = (int)((deg + 90.0) / 180.0 * bins);
             hist[Math.max(0, Math.min(bins-1, bin))]++;
         }
@@ -366,8 +306,6 @@ public class Lab6 {
         g.dispose();
         return img;
     }
-
-    // ── Компоновка строк изображений ─────────────────────────────────────────────
 
     static BufferedImage makeRow(String title, String[] lbls, BufferedImage[] imgs) {
         int pad = 6, topH = 22, labH = 13;
@@ -408,42 +346,33 @@ public class Lab6 {
         return out;
     }
 
-    // ── Обработка одного изображения ─────────────────────────────────────────────
-
     static void processImage(double[][] src, String name,
                              String outDir, PrintWriter log) throws IOException {
         int h = src.length, w = src[0].length;
         log.println("=== " + name + " (" + w + "×" + h + ") ===");
 
-        // 1. Порог Оцу
         int T = otsuThreshold(src);
         log.println("  Порог Оцу: T = " + T);
 
         boolean[][] bin = binarize(src, T);
 
-        // 2. 4-связная разметка (двухпроходный алгоритм, лекция 9)
         int[][] labels4 = labelComponents4(bin);
         int numLabels4 = lastNumLabels;
         log.println("  4-связных регионов: " + numLabels4);
 
-        // 3. Моменты и признаки формы (лекция 10)
         Region[] regions4 = computeRegions(labels4, numLabels4);
 
-        // Фильтрация: площадь > 30 пикселов
         final int MIN_AREA = 30;
         List<Region> large = new ArrayList<>();
         for (Region r : regions4) if (r.m00 > MIN_AREA) large.add(r);
-        // Сортируем по убыванию площади
         large.sort((a, b) -> Double.compare(b.m00, a.m00));
         log.println("  Регионов с S > " + MIN_AREA + ": " + large.size());
 
-        // Круглые: Kr2 < 1.3 (округлость по моментам инерции, лекция 10)
-        final double KR2_THRESH = 1.3;
+        final double KR2_THRESH = 1.04;
         List<Region> circles = new ArrayList<>();
         for (Region r : large) if (r.kr2 < KR2_THRESH) circles.add(r);
         log.println("  Из них похожих на круг (Kr2 < " + KR2_THRESH + "): " + circles.size());
 
-        // Лог признаков крупных регионов (до 30 строк)
         log.printf("  %-6s %-8s %-7s %-7s %-9s %-9s %-9s %-6s %-7s%n",
                 "Метка","m00","xc","yc","μ20","μ02","μ11","Kr2","∠°");
         int logCount = 0;
@@ -455,15 +384,11 @@ public class Lab6 {
             if (++logCount >= 30) { if (large.size() > 30) log.println("  ... (показаны первые 30)"); break; }
         }
 
-        // Дополн. задание 1: 8-связная разметка (FloodFill, лекция 9)
         int[][] labels8 = labelComponents8(bin);
         int numLabels8 = lastNumLabels;
         log.println("  8-связных регионов: " + numLabels8);
         log.println();
 
-        // ── Визуализация ─────────────────────────────────────────────────────────
-
-        // Маски для наложения (доп. задание 2: оставить области с заданными характеристиками)
         boolean[] maskLarge  = new boolean[numLabels4];
         boolean[] maskCircle = new boolean[numLabels4];
         for (Region r : large)   maskLarge [r.label-1] = true;
@@ -496,8 +421,6 @@ public class Lab6 {
 
         save(vstack(row1, row2, row3), outDir + "/" + name + "_seg.png");
     }
-
-    // ── Точка входа ──────────────────────────────────────────────────────────────
 
     public static void main(String[] args) throws IOException {
         String outDir = "results6";
